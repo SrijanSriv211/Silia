@@ -3,17 +3,11 @@ Srijan Srivastava
 India
 Srivastavavsrijan321@gmail.com
 QCoreNest@gmail.com
+v2, June 2026
 
 
 ## Abstract
 Introduction of the Transformer neural network architecture in the famous `Attention Is All You Need` paper has created a huge wave of AI development in recent years. The scaled dot-product attention allows for information to be processed with higher efficiency and quality, which the previous RNN-based models lacked. However Transformer-based models comes with their own challenges, particularly with parameter efficiency for tiny models with parameters ≤ 5M. At such small scale a Transformer model essentially uses more parameter than it really should. This sub-ten-million parameters domain space is very underexplored and for good reasons but I wanted to explore it anyways. So here-in this paper I am introducing Silia, a novel transformer architecture designed for efficient modelling & classification tasks under severe parameter budget. Training against GPT-2 architecture (Andrej Karpathy's nanoGPT project) with same "base" hyperparameters, training data and compute budget, Silia achieves comparable loss and generation quality with significantly less parameters.
-
-> [!NOTE]
-> Due to the following constraints I'll be treating this paper more as a report on the architecture than a final conclusion of any means.
-> 
-> All experiments were conducted on an old (2nd Gen Intel Core i3 processor, 8 GB RAM and no dedicated GPU) hardware reflecting resource reality of many independent student researchers, including me.
-> 
-> This also means that Silia's parameter efficiency and performance gains may fade away at larger scales. Though this is still to be explored since I haven't scaled up Silia beyond 10M parameters.
 
 
 ## 1. Introduction
@@ -139,8 +133,6 @@ So instead of running both separately and wasting parameters on overlapping func
 
 ## 3. Experiments
 The idea and intuition is quite simple but it works surprisingly well at tiny scale (≤ 5M parameters) and is able to achieve comparable loss and generation quality to Andrej Karpathy's GPT-2 architecture based nanoGPT model.
-
-The following experiments were conducted on an old hardware with 2nd Gen Intel Core i3 processor, 8 GB RAM and no dedicated GPU so there isn't much experimental evidence to back any of my claims but they do show interesting results and up to some degree agree with my hypothesis.
 
 I custom trained a OpenAI-o200k_base-regex-pattern+BPE tokenizer on my custom [Srijan-Srivastava/super-tiny-webtext](https://huggingface.co/datasets/Srijan-Srivastava/webtext-super-tiny) dataset with a vocabulary size of 8192 tokens. This exact same tokenizer was used for all the following experiments.
 
