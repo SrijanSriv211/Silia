@@ -31,11 +31,16 @@ class CausalSelfAttention(nn.Module):
 		self.qkv = nn.Linear(config.n_embd, 3*n_qkv, bias=False)
 		self.out = nn.Linear(n_qkv, config.n_embd*chunk, bias=False)
 
-	def forward(self, x):
+	def forward(self, x, cos_sin):
 		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
 		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
 		q, k, v  = self.qkv(x).view(B, T, self.n_head, -1).chunk(3, dim=-1)
+
+		# apply rotary embeddings to queries and keys to get relative positional encoding
+		cos, sin = cos_sin
+		q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
+		q, k = norm(q), norm(k) # QK norm
 
 		# make head be batch dim, i.e. (B, T, nh, hs) -> (B, nh, T, hs)
 		q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
