@@ -8,8 +8,8 @@ from itertools import chain
 
 import random, pickle, torch, regex, json, time, math, sys, os
 
-torch._inductor.config.coordinate_descent_tuning = True
-torch._dynamo.config.compiled_autograd = True
+# torch._inductor.config.coordinate_descent_tuning = True
+# torch._dynamo.config.compiled_autograd = True
 init(autoreset=True)
 
 # load config
@@ -268,8 +268,8 @@ print0(
 )
 
 # compile the model
-print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
-model = torch.compile(model)
+# print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
+# model = torch.compile(model)
 
 # training loop
 # start training the model
