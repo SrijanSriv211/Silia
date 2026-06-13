@@ -1,3 +1,4 @@
+from multiprocessing import Pool, cpu_count
 from colorama import init, Fore, Style
 import pickle, regex, json, time, os
 
@@ -68,6 +69,73 @@ def merge(ids, pair, idx):
 
 	return newids
 
+# optimized: merge a batch of (chunk, weight) pairs given a single (pair -> idx)
+def _merge_batch(args):
+	"""Merge pair->idx in a list of chunks. Runs in a worker process."""
+	chunks, weights, pair, idx = args
+	new_chunks = [merge(c, pair, idx) for c in chunks]
+	return new_chunks
+
+# optimized encode chunk: O(n) instead of O(n^2) using a single left-to-right pass
+def _encode_chunk_fast(text_bytes, inverse_vocab):
+	ids = list(text_bytes)
+	if len(ids) < 2:
+		return ids
+
+	changed = True
+	while changed:
+		changed = False
+		newids = []
+		i = 0
+		while i < len(ids):
+			if i < len(ids) - 1:
+				key = bytes([ids[i]]) + bytes([ids[i+1]]) if ids[i] < 256 and ids[i+1] < 256 else None
+				# use prebuilt inverse_vocab which maps bytes -> token id
+				merged = inverse_vocab.get(key) if key else None
+				if merged is None:
+					# try looking up via vocab bytes concatenation (handles merged tokens)
+					pass
+				if merged is not None:
+					newids.append(merged)
+					i += 2
+					changed = True
+					continue
+			newids.append(ids[i])
+			i += 1
+		ids = newids
+	return ids
+
+# worker for parallel encode_ordinary (must be top-level for pickling)
+_GLOBAL_ENCODER_STATE = {}
+
+def _worker_encode_chunk(chunk_bytes):
+	inverse_vocab = _GLOBAL_ENCODER_STATE['inverse_vocab']
+	vocab = _GLOBAL_ENCODER_STATE['vocab']
+	ids = list(chunk_bytes)
+	if len(ids) < 2:
+		return ids
+	changed = True
+	while changed:
+		changed = False
+		newids = []
+		i = 0
+		while i < len(ids):
+			if i < len(ids) - 1:
+				merged_bytes = vocab.get(ids[i], b'') + vocab.get(ids[i+1], b'')
+				merged_id = inverse_vocab.get(merged_bytes)
+				if merged_id is not None:
+					newids.append(merged_id)
+					i += 2
+					changed = True
+					continue
+			newids.append(ids[i])
+			i += 1
+		ids = newids
+	return ids
+
+def _init_worker(state):
+	_GLOBAL_ENCODER_STATE.update(state)
+
 class Encoder:
 	def __init__(self, pattern=None):
 		"""
@@ -81,7 +149,7 @@ class Encoder:
 		self.inverse_special_tokens = {}
 		self.vocab = {idx: bytes([idx]) for idx in range(256)} # idx -> bytes
 
-	def train(self, text, vocab_size=256, text_range=None):
+	def train(self, text, vocab_size=256, text_range=None, n_workers=None):
 		"""
 		- path: [name, is_dir]
 		- vocab_size: max number of merges to be made - 256 bytes
@@ -89,6 +157,8 @@ class Encoder:
 		"""
 		assert vocab_size >= 256
 		start_time = time.time()
+		if n_workers is None:
+			n_workers = cpu_count()
 
 		print(
 			"encoding text with", f"{Fore.WHITE}{Style.BRIGHT}{len(text)/1e6}M", "total characters and",
@@ -118,14 +188,19 @@ class Encoder:
 			byte_str = bytes(byte_str)
 			tmp[byte_str] = tmp.get(byte_str, 0) + 1
 
-		ids = [list(k) for k in map(list, tmp.keys())]
+		ids = [list(k) for k in tmp.keys()]
 		idsw = list(tmp.values())
 
 		print("training on vocab size", f"{Fore.WHITE}{Style.BRIGHT}{vocab_size}")
+		print(f"using {Fore.WHITE}{Style.BRIGHT}{n_workers}{Style.RESET_ALL} workers")
+
+		n_merges = vocab_size - 256
 		last_print_time = time.time()
 
+		# split chunks into batches for parallel merge
+		batch_size = max(1, len(ids) // n_workers)
+
 		# iteratively merge the most common pairs to create new tokens
-		n_merges = vocab_size - 256
 		for i in range(n_merges):
 			# count the number of times every consecutive pair appears
 			stats = {}
@@ -142,7 +217,28 @@ class Encoder:
 			self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
 
 			# replace all occurrences of pair in ids with idx
-			ids = [merge(chunk_ids, pair, idx) for chunk_ids in ids]
+			# parallel merge
+			if n_workers > 1 and len(ids) > n_workers:
+				batches = []
+				wbatches = []
+
+				for b in range(n_workers):
+					start = b * batch_size
+					end = start + batch_size if b < n_workers - 1 else len(ids)
+					batches.append(ids[start:end])
+					wbatches.append(idsw[start:end])
+
+				args = [(batches[b], wbatches[b], pair, idx) for b in range(n_workers)]
+
+				with Pool(n_workers) as pool:
+					results = pool.map(_merge_batch, args)
+
+				ids = []
+
+				for r in results:
+					ids.extend(r)
+			else:
+				ids = [merge(chunk_ids, pair, idx) for chunk_ids in ids]
 
 			# verbose
 			current_print_time = time.time()
@@ -168,7 +264,10 @@ class Encoder:
 		self.special_tokens = dict([(x, i + len(self.vocab)) for i, x in enumerate(special_tokens)])
 		self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()}
 
-	# given ids (list of integers), return Python string
+	def register_special_tokens(self, *special_tokens):
+		self.special_tokens = dict([(x, i + len(self.vocab)) for i, x in enumerate(special_tokens)])
+		self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()}
+
 	def decode(self, ids):
 		part_bytes = []
 		for idx in ids:
@@ -180,63 +279,73 @@ class Encoder:
 
 			else:
 				raise ValueError(f"invalid token id: {idx}")
+		return b"".join(part_bytes).decode("utf-8", errors="replace")
 
-		text_bytes = b"".join(part_bytes)
-		return text_bytes.decode("utf-8", errors="replace")
+	def _build_inverse_vocab(self):
+		return {v: k for k, v in self.vocab.items()}
 
-	# return the token ids
-	# https://github.com/karpathy/minbpe/pull/84/files#diff-6b5737d60acbc8d11dba46334d76c559796c1aca8d51e13ed069236f947b9e1f
 	def _encode_chunk(self, text_bytes, inverse_vocab):
+		"""O(n) left-to-right greedy merge pass, repeated until stable."""
 		ids = list(text_bytes)
 		if len(ids) < 2:
 			return ids
 
-		first, last = 0, 2
+		changed = True
+		while changed:
+			changed = False
+			newids = []
+			i = 0
 
-		while first <= len(ids):
-			if len(ids[first:last]) < 2:
-				break
+			while i < len(ids):
+				if i < len(ids) - 1:
+					merged_bytes = self.vocab.get(ids[i], b'') + self.vocab.get(ids[i+1], b'')
+					merged_id = inverse_vocab.get(merged_bytes)
+					if merged_id is not None:
+						newids.append(merged_id)
+						i += 2
+						changed = True
+						continue
 
-			i0 = ids[first:last][0]
-			i1 = ids[first:last][1]
-
-			if self.vocab[i0] + self.vocab[i1] in inverse_vocab.keys():
-				ids[first:last] = [inverse_vocab[self.vocab[i0] + self.vocab[i1]]]
-				first, last = 0, 2
-
-			else:
-				first += 1
-				last += 1
-
+				newids.append(ids[i])
+				i += 1
+			ids = newids
 		return ids
 
-	def encode_ordinary(self, text, inverse_vocab):
-		"""Encoding that ignores any special tokens."""
-		# split text into chunks of text by categories defined in regex pattern
+	def encode_ordinary(self, text, inverse_vocab=None, n_workers=1):
+		"""Encoding that ignores any special tokens. Optionally parallel."""
+		if inverse_vocab is None:
+			inverse_vocab = self._build_inverse_vocab()
+
 		text_chunks = regex.findall(self.compiled_pattern, text)
+		chunk_bytes_list = [chunk.encode("utf-8") for chunk in text_chunks]
 
-		# all chunks of text are encoded separately, then results are joined
-		ids = []
-		for chunk in text_chunks:
-			chunk_bytes = chunk.encode("utf-8") # raw bytes
-			chunk_ids = self._encode_chunk(chunk_bytes, inverse_vocab)
-			ids.extend(chunk_ids)
+		if n_workers > 1 and len(chunk_bytes_list) > n_workers:
+			state = {'inverse_vocab': inverse_vocab, 'vocab': self.vocab}
+			with Pool(n_workers, initializer=_init_worker, initargs=(state,)) as pool:
+				results = pool.map(_worker_encode_chunk, chunk_bytes_list)
+
+			ids = []
+			for r in results:
+				ids.extend(r)
+
+		else:
+			ids = []
+			for chunk_bytes in chunk_bytes_list:
+				ids.extend(self._encode_chunk(chunk_bytes, inverse_vocab))
+
 		return ids
 
-	def encode(self, str, isfile=False, allowed_special="none_raise"):
+	def encode(self, str, isfile=False, allowed_special="none_raise", n_workers=1):
 		"""
 		Unlike encode_ordinary, this function handles special tokens.
 		allowed_special: can be "all"|"none"|"none_raise" or a custom set of special tokens
-		if none_raise, then an error is raised if any special token is encountered in text
-		this is the default tiktoken behavior right now as well
-		any other behavior is either annoying, or a major footgun
+		n_workers: number of parallel workers for encoding chunks
 		"""
 		text = str
 		if isfile:
 			with open(str, "r", encoding="utf-8") as f:
 				text = f.read()
 
-		# decode the user desire w.r.t. handling of special tokens
 		special = None
 		if allowed_special == "all":
 			special = self.special_tokens
@@ -254,31 +363,22 @@ class Encoder:
 		else:
 			raise ValueError(f"allowed_special={allowed_special} not understood")
 
-		inverse_vocab = {v: k for k, v in self.vocab.items()}
-		# shortcut: if no special tokens, just use the ordinary encoding
-		if not special:
-			return self.encode_ordinary(text, inverse_vocab)
+		inverse_vocab = self._build_inverse_vocab()
 
-		# otherwise, we have to be careful with potential special tokens in text
-		# we handle special tokens by splitting the text
-		# based on the occurrence of any exact match with any of the special tokens
-		# we can use regex.split for this. note that surrounding the pattern with ()
-		# makes it into a capturing group, so the special tokens will be included
+		if not special:
+			return self.encode_ordinary(text, inverse_vocab, n_workers=n_workers)
+
 		special_pattern = "(" + "|".join(regex.escape(k) for k in special) + ")"
 		special_chunks = regex.split(special_pattern, text)
 		del text
 
-		# now all the special characters are separated from the rest of the text
-		# all chunks of text are encoded separately, then results are joined
 		ids = []
 		for part in special_chunks:
 			if part in special:
-				# this is a special token, encode it separately as a special case
 				ids.append(special[part])
 
 			else:
-				# this is an ordinary sequence, encode it normally
-				ids.extend(self.encode_ordinary(part, inverse_vocab))
+				ids.extend(self.encode_ordinary(part, inverse_vocab, n_workers=n_workers))
 
 		return ids
 
