@@ -301,3 +301,36 @@ Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N
 Noam Shazeer, (2020). GLU variants improve transformer. _arXiv preprint arXiv:2002.05202_.
 
 Andrej Karpathy, (2022). nanoGPT. GitHub. https://github.com/karpathy/nanogpt
+
+## Architecture Design
+```
+Input tokens
+    |
+[Token Embedding]
+    |
+[Silia Block xN:]
+    |--- Multi-Headed Attention
+    |    |--- Rotary Positional Embeddings
+    |    |--- QK Norm
+    |    |--- Scaled Dot Product Attention
+    |--- Silu activation function
+    |--- Multi-Headed Attention
+    |--- Attention Residuals
+[Output Projection (weight-tied)]
+    |
+Next token logits
+```
+
+## Citation
+
+```
+@software{Silia,
+    author={Srijan Srivastava},
+    title={Silia},
+    url={https://github.com/SrijanSriv211/Silia},
+    version={0.1.0},
+    year = {2026}
+}
+```
+
+<img src="img/requiem.png" alt="lookwhosback" style="width:100%;">
