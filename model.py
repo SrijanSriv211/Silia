@@ -22,30 +22,30 @@ def apply_rotary_emb(x, cos, sin):
 	return torch.cat([y1, y2], 3)
 
 class CausalSelfAttention(nn.Module):
-    def __init__(self, config: Config, chunk=1):
-        super().__init__()
+	def __init__(self, config: Config, chunk=1):
+		super().__init__()
 		self.n_head = config.n_head
 		self.n_embd = config.n_embd
 		n_qkv = config.n_embd * self.n_head
 
-        self.qkv = nn.Linear(config.n_embd, 3*n_qkv, bias=False)
-        self.out = nn.Linear(n_qkv, config.n_embd*chunk, bias=False)
+		self.qkv = nn.Linear(config.n_embd, 3*n_qkv, bias=False)
+		self.out = nn.Linear(n_qkv, config.n_embd*chunk, bias=False)
 
-    def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+	def forward(self, x):
+		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.qkv(x).view(B, T, self.n_head, -1).chunk(3, dim=-1)
+		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
+		q, k, v  = self.qkv(x).view(B, T, self.n_head, -1).chunk(3, dim=-1)
 
 		# make head be batch dim, i.e. (B, T, nh, hs) -> (B, nh, T, hs)
 		q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
 
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
-        y = y.transpose(1, 2).contiguous().view(B, T, -1) # re-assemble all head outputs side by side
+		# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+		y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+		y = y.transpose(1, 2).contiguous().view(B, T, -1) # re-assemble all head outputs side by side
 
-        # output projection
-        return self.out(y)
+		# output projection
+		return self.out(y)
 
 class Block(nn.Module):
 	def __init__(self, config: Config):
