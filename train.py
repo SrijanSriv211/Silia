@@ -1,3 +1,6 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 from model import Silia, Config
 from encoder import Encoder
 from optimizer import Muon
@@ -6,7 +9,7 @@ from colorama import Style, Fore, init
 from rich.progress import track
 from itertools import chain
 
-import random, pickle, torch, regex, json, time, math, sys, os
+import random, pickle, torch, regex, json, time, math, sys
 
 # torch._inductor.config.coordinate_descent_tuning = True
 # torch._dynamo.config.compiled_autograd = True
