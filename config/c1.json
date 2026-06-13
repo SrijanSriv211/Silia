@@ -28,7 +28,7 @@
 	"init_from": "scratch",
 	"seed": 18,
 
-	"gradient_accumulation_steps": 4,
+	"gradient_accumulation_steps": 1,
 	"batch_size": 8,
 
 	"max_iters": 20000,
