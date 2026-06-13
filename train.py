@@ -1,5 +1,6 @@
 from model import Silia, Config
 from encoder import Encoder
+from optimizer import Muon
 
 from colorama import Style, Fore, init
 from rich.progress import track
