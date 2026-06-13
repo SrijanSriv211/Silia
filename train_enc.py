@@ -5,7 +5,6 @@ special_tokens = ["<|sink|>", "<|eop|>", "<|eot|>"]
 dataset_path = "data/train-00000-of-00001.parquet"
 outpath = "bin/cl16k.bin"
 vocab_size = 16384 - len(special_tokens)
-text_range = 100_000_000
 
 dir = os.path.split(outpath)[0]
 if not os.path.isdir(dir):
@@ -17,7 +16,7 @@ text = df["text"].tolist()
 text = "\n".join(text) + "\n"
 
 #* set `vocab_size` in `config.json` 4096
-enc.train(text, vocab_size, text_range=text_range)
+enc.train(text, vocab_size)
 enc.register_special_tokens(*special_tokens)
 enc.save(outpath)
 

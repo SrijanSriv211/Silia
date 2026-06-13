@@ -81,7 +81,7 @@ class Encoder:
 		self.inverse_special_tokens = {}
 		self.vocab = {idx: bytes([idx]) for idx in range(256)} # idx -> bytes
 
-	def train(self, text, vocab_size=256, text_range=None):
+	def train(self, text, vocab_size=256, text_range=10_000_000):
 		"""
 		- path: [name, is_dir]
 		- vocab_size: max number of merges to be made - 256 bytes
@@ -104,7 +104,7 @@ class Encoder:
 		# split the text up into text chunks
 		t = time.time()
 		text_chunks = regex.findall(self.compiled_pattern, text if text_range is None else text[:text_range])
-		print("findall:", time.time() - t)
+		print("findall:", calc_total_time(time.time() - t))
 		del text
 
 		print(f"encoding text chunks... {Fore.WHITE}{Style.DIM}(takes a ~minute)")
@@ -112,7 +112,7 @@ class Encoder:
 		# input text preprocessing
 		t = time.time()
 		ids = [list(ch.encode("utf-8")) for ch in text_chunks]
-		print("encode utf-8:", time.time() - t)
+		print("encode utf-8:", calc_total_time(time.time() - t))
 		del text_chunks
 
 		# keep just one instance of identical chunks, keep their count in idsw
@@ -125,13 +125,14 @@ class Encoder:
 
 		ids = [list(k) for k in map(list, tmp.keys())]
 		idsw = list(tmp.values())
-		print("dedup:", time.time() - t)
+		print("dedup:", calc_total_time(time.time() - t))
 
+		# start training
 		print("training on vocab size", f"{Fore.WHITE}{Style.BRIGHT}{vocab_size}")
+		n_merges = vocab_size - 256
 		last_print_time = time.time()
 
 		# iteratively merge the most common pairs to create new tokens
-		n_merges = vocab_size - 256
 		for i in range(n_merges):
 			# count the number of times every consecutive pair appears
 			stats = {}
