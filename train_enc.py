@@ -7,7 +7,7 @@ outpath = "bin/cl16k.bin"
 vocab_size = 16384 - len(special_tokens)
 text_range = 100_000_000
 
-dir = os.path.split(CONFIG["outpath"])[0]
+dir = os.path.split(outpath)[0]
 if not os.path.isdir(dir):
 	os.mkdir(dir)
 
