@@ -87,17 +87,17 @@ Here `C` is embedding dimension, `D` is head dimension (typically 64 or 128), `N
 
 Now add all Attention layer shapes
 
-$$C*(3*N*D) + (N*D)*C = 4*C^2 \tag{1}$$
+$$C*(3 \cdot N \cdot D) + (N \cdot D) \cdot C = 4 \cdot C^2 \tag{1}$$
 
 Now add all SwiGLU layer shapes
 
-$$C*(2*4*C) + (4*C)*C = 3*4*C^2 \tag{2}$$
+$$C \cdot (2 \cdot 4 \cdot C) + (4 \cdot C) \cdot C = 3 \cdot 4 \cdot C^2 \tag{2}$$
 
 Now add equation $(1)$ and $(2)$ together
 
-$$4*C^2 + 3*4*C^2 = (4*C)^2$$
+$$4 \cdot C^2 + 3 \cdot 4 \cdot C^2 = (4 \cdot C)^2$$
 
-So we have a total of $(4*C)^2$ parameters per layer in a traditional Transformer.
+So we have a total of $(4 \cdot C)^2$ parameters per layer in a traditional Transformer.
 
 #### 2.2.2. Parameters Per Layer In Silia
 Unlike Transformer in Silia we merge both Attention and SwiGLU FFN together as discussed above. In Silia we have $W_{Q_1}$, $W_{Q_2}$, $W_{K_1}$, $W_{K_2}$, $W_{V_1}$, $W_{V_2}$, $W_{V_3}$, $W_O$ layers. Again for the sake of simplicity, let's call them QK, V and O.
@@ -110,9 +110,9 @@ Here `D` is head dimension (set to 64 or 128), `N` is number of heads.
 
 Now add all shapes together
 
-$$D*(4*N*D) + D*(3*N*D) + (N*D)*D = 8*N*D^2$$
+$$D \cdot (4 \cdot N \cdot D) + D \cdot (3 \cdot N \cdot D) + (N \cdot D) \cdot D = 8 \cdot N \cdot D^2$$
 
-So in Silia we have $8*N*D^2$ parameters per layer. Comparing number of parameters in Transformer with Silia we get $8*N*D^2 < (4*C)^2$
+So in Silia we have $8 \cdot N \cdot D^2$ parameters per layer. Comparing number of parameters in Transformer with Silia we get $8*N*D^2 < (4*C)^2$
 
 #### 2.2.3. What Just Happened?
 Now I know what you might be thinking. _Why did he take embedding dimension same as head dimension in his architecture? Obviously this will reduce the number of parameters. Is he stupid? Did I just wasted my time reading some AI slop?_
