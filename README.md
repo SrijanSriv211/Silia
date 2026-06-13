@@ -1,8 +1,12 @@
 # Tiny Scale Is All I Can Spare To Play With Transformer.
 Srijan Srivastava
+
 India
+
 Srivastavavsrijan321@gmail.com
+
 QCoreNest@gmail.com
+
 v2, June 2026
 
 
@@ -34,23 +38,38 @@ Prior to this, the standard Transformer architecture heavily relied on simpler a
 
 #### 2.1.2. Attention
 Attention is the heart of Transformer and it needs no introduction, so before diving into Silia's mathematics let's get attention's done first.
+
 $$Q = XW_Q, K=XW_K, V=XW_V$$
+
 $$\mathrm{MHA}(Q,K,V,M) = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
+
 $$\text{Attention}(X) = \text{MHA}(Q, K, V, M)W_O$$
+
 The above equation is what was introduced in the now famous `Attention Is All You Need` paper. This is the equation which is used for autoregressive language modelling where  $W_Q$ is the query matrix, $W_K$ is key matrix, $W_V$ is value matrix, $W_O$ is output projection matrix, $M$ is a causal attention mask and $d_k$ is dimension of the key vectors.
 
 #### 2.1.3. Silia
 Now as we've been through both SwiGLU and Attention, let's get into the mathematics of **Silia**.
+
 We first calculate attention over the hidden state $X$.
+
 $$Q = XW_{Q_1}, K=XW_{K_1}, V_1=XW_{V_1}, V_2 = XW_{V_2}$$
+
 $$\mathrm{AttentionScores}(Q,K,V,M) = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)$$
+
 $$U = AttentionScores(Q, K, V, M)V_1$$
+
 $$V = AttentionScores(Q, K, V, M)V_2$$
+
 $$H = \text{SiLU}(U) \odot V \tag{1}$$
+
 Now in equation $(1)$ we have applied the $SiLU$ activation function on the linear transformation of our hidden state $X$ via attention mechanism. Now we will calculate attention over this new hidden state $H$.
+
 $$Q = HW_{Q_2}, K=HW_{K_2}, V=HW_{V_3}$$
+
 $$\mathrm{MHA}(Q,K,V,M) = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
+
 $$O = \text{MHA}(Q, K, V, M)W_O$$
+
 And here we go. We have our new **Silia** feed-forward network.
 
 ### 2.2. How Is It Parameter Efficient?
@@ -61,18 +80,23 @@ In a traditional Transformer the Attention layer has $W_Q$, $W_K$, $W_V$ and $W_
 
 1. Matrix QKV is shaped `(C, 3*N*D)` where $Q$, $K$, $V$ each `(C, N*D)`.
 2. Matrix $O$ in Attention is shaped `(N*D, C)`.
-
 3. Matrix GC is shaped `(C, 2*4*C)` where $G$, $C$ each `(C, 4*C)`.
 4. Matrix $O$ in SwiGLU is shaped `(4*C, C)`.
 
 Here `C` is embedding dimension, `D` is head dimension (typically 64 or 128), `N` is number of heads, `4*C` in SwiGLU is expansion. Head dimension (`D`) is typically `C/N`.
 
 Now add all Attention layer shapes
+
 $$C*(3*N*D) + (N*D)*C = 4*C^2 \tag{1}$$
+
 Now add all SwiGLU layer shapes
+
 $$C*(2*4*C) + (4*C)*C = 3*4*C^2 \tag{2}$$
+
 Now add equation $(1)$ and $(2)$ together
+
 $$4*C^2 + 3*4*C^2 = (4*C)^2$$
+
 So we have a total of $(4*C)^2$ parameters per layer in a traditional Transformer.
 
 #### 2.2.2. Parameters Per Layer In Silia
@@ -85,7 +109,9 @@ Unlike Transformer in Silia we merge both Attention and SwiGLU FFN together as d
 Here `D` is head dimension (set to 64 or 128), `N` is number of heads.
 
 Now add all shapes together
+
 $$D*(4*N*D) + D*(3*N*D) + (N*D)*D = 8*N*D^2$$
+
 So in Silia we have $8*N*D^2$ parameters per layer. Comparing number of parameters in Transformer with Silia we get $8*N*D^2 < (4*C)^2$
 
 #### 2.2.3. What Just Happened?
