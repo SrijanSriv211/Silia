@@ -6,13 +6,10 @@ from encoder import Encoder
 from optimizer import Muon
 
 from colorama import Style, Fore, init
-from contextlib import nullcontext
 from rich.progress import track
 from itertools import chain
 
 import random, pickle, torch, regex, json, time, math, sys
-
-init(autoreset=True)
 
 # load config
 CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.argv) > 1 else {
@@ -53,7 +50,6 @@ CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.
 	"log_interval": 200,
 	"eval_iters": 200,
 
-	"grad_clip": 1,
 	"decay_lr": True,
 	"lr_decay_iters": 50000,
 	"learning_rate": 3e-3,
@@ -63,6 +59,7 @@ CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.
 }
 
 # save the text in a text file
+init(autoreset=True)
 ansi_escape = regex.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 
 def print0(*text, println=True, overwrite=False, save_to_file=True, log_path="bin"):
@@ -107,19 +104,14 @@ if not os.path.isdir(CONFIG["checkpoints"]["path"]):
 	os.mkdir(CONFIG["checkpoints"]["path"])
 log_path = CONFIG["checkpoints"]["path"]
 
-# cuda backends
-torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-
 # set device
 device = "cuda" if torch.cuda.is_available() else "cpu"
 init_from = CONFIG["init_from"][11:] if CONFIG["init_from"].startswith("pretrained,") else "scratch"
 
-# "float32", "bfloat16", or "float16", the latter will auto implement a GradScaler
+# set dtype
 dtype = "bfloat16" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else "float16"
-# note: float16 data type will automatically use a GradScaler
 ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
-ctx = nullcontext() if device == "cpu" else torch.amp.autocast(device_type=device, dtype=ptdtype)
+ctx = torch.amp.autocast(device_type=device, dtype=ptdtype)
 
 # print the device
 print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
@@ -176,9 +168,6 @@ if optimizer_hyperparams["use_muon"]:
 	)
 	optimizers.append(optimizer2)
 
-# initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.amp.GradScaler("cude", enabled=(dtype == 'float16'))
-
 # load optimizer(s) state dict if loading from checkpoint
 if checkpoint is not None:
 	for o, s in zip(optimizers, checkpoint["optimizers"]):
@@ -223,13 +212,7 @@ class dataloader:
 		ix = torch.randint(len(data) - self.block_size, (self.batch_size,))
 		x = torch.stack([data[i:i + self.block_size] for i in ix])
 		y = torch.stack([data[i+1:i+1 + self.block_size] for i in ix])
-
-		# pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-		if device == "cuda":
-			return x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-
-		else:
-			return x.to(device), y.to(device)
+		return x.to(device), y.to(device)
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -287,10 +270,6 @@ print0(
 	log_path=log_path
 )
 
-# compile the model
-# print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
-# model = torch.compile(model, backend="eager")
-
 # training loop
 # start training the model
 print0("started training", log_path=log_path)
@@ -336,18 +315,11 @@ for _ in range(n_steps):
 		X, Y = dataset.next_batch("train")
 		with ctx:
 			_, loss = model(X, Y)
-
 			# scale the loss to account for gradient accumulation
 			loss = loss / CONFIG["gradient_accumulation_steps"]
-
-		# backward pass, with gradient scaling if training in fp16
-		scaler.scale(loss).backward()
-
-	## clip the gradient
-	if CONFIG["grad_clip"] != 0.0:
-		for o in optimizers:
-			scaler.unscale_(o)
-		torch.nn.utils.clip_grad_norm_(model.parameters(), CONFIG["grad_clip"])
+		# backward pass
+		loss.backward()
+	torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
 	if optimizer_hyperparams["use_muon"]:
 		for group in optimizers[1].param_groups:
@@ -355,10 +327,8 @@ for _ in range(n_steps):
 			group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
 
 	## step the optimizers
-	## step the optimizer and scaler if training in fp16
 	for o in optimizers:
-		scaler.step(o)
-	scaler.update()
+		o.step()
 
 	## flush the gradients as soon as we can, no need for this memory anymore
 	optimizers[0].zero_grad(set_to_none=True)
