@@ -53,6 +53,7 @@ CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.
 	"log_interval": 200,
 	"eval_iters": 200,
 
+	"grad_clip": 1,
 	"decay_lr": True,
 	"lr_decay_iters": 50000,
 	"learning_rate": 3e-3,
@@ -176,7 +177,7 @@ if optimizer_hyperparams["use_muon"]:
 	optimizers.append(optimizer2)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
+scaler = torch.amp.GradScaler(enabled=(dtype == 'float16'))
 
 # load optimizer(s) state dict if loading from checkpoint
 if checkpoint is not None:
@@ -288,7 +289,7 @@ print0(
 
 # compile the model
 print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
-model = torch.compile(model, backend="aot_eager")
+model = torch.compile(model, backend="eager")
 
 # training loop
 # start training the model
@@ -342,7 +343,10 @@ for _ in range(n_steps):
 		# backward pass, with gradient scaling if training in fp16
 		scaler.scale(loss).backward()
 
-	torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
+	## clip the gradient
+	if CONFIG["grad_clip"] != 0.0:
+		scaler.unscale_(optimizer)
+		torch.nn.utils.clip_grad_norm_(model.parameters(), CONFIG["grad_clip"])
 
 	if optimizer_hyperparams["use_muon"]:
 		for group in optimizers[1].param_groups:
@@ -350,14 +354,12 @@ for _ in range(n_steps):
 			group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
 
 	## step the optimizers
+	## step the optimizer and scaler if training in fp16
 	for o in optimizers:
-		o.step()
-
-	# step the optimizer and scaler if training in fp16
-	scaler.step(optimizer)
+		scaler.step(o)
 	scaler.update()
 
-	# flush the gradients as soon as we can, no need for this memory anymore
+	## flush the gradients as soon as we can, no need for this memory anymore
 	optimizers[0].zero_grad(set_to_none=True)
 	model.zero_grad(set_to_none=True)
 
@@ -366,6 +368,8 @@ for _ in range(n_steps):
 	if CONFIG["checkpoints"]["create_checkpoints"] and stats["step"] > 0 and stats["step"] % CONFIG["checkpoints"]["interval"] == 0:
 		print0(f"saved checkpoint at step {Fore.WHITE}{Style.BRIGHT}{stats["step"]}", log_path=log_path)
 		torch.save(get_state(model, optimizers), f"{CONFIG["checkpoints"]["path"]}/step{stats["step"]}.bin")
+		with open(f"{CONFIG["checkpoints"]["path"]}/step{stats["step"]}.json", "w", encoding="utf-8") as f:
+			json.dump(stats, f, indent=4)
 
 	## log train-val loss
 	if stats["step"] > 0 and stats["step"] % CONFIG["eval_interval"] == 0:
@@ -421,3 +425,5 @@ for _ in range(n_steps):
 
 print0("total time:", calc_total_time(time.time() - start_time), log_path=log_path)
 torch.save(get_state(model, optimizers), f"{CONFIG["checkpoints"]["path"]}/final.bin")
+with open(f"{CONFIG["checkpoints"]["path"]}/final.json", "w", encoding="utf-8") as f:
+	json.dump(stats, f, indent=4)
