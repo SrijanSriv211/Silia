@@ -315,6 +315,7 @@ for _ in range(n_steps):
 		X, Y = dataset.next_batch("train")
 		with ctx:
 			_, loss = model(X, Y)
+
 			# scale the loss to account for gradient accumulation
 			loss = loss / CONFIG["gradient_accumulation_steps"]
 		# backward pass
