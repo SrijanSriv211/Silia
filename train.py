@@ -354,8 +354,8 @@ for _ in range(n_steps):
 			f"time took {Fore.WHITE}{Style.DIM}{calc_total_time(eval_dt)}",
 			log_path=log_path
 		)
-		stats["loss"]["train"].append(losses["train"])
-		stats["loss"]["val"].append(losses["val"])
+		stats["loss"]["train"].append(losses["train"].item())
+		stats["loss"]["val"].append(losses["val"].item())
 
 		### sample generation
 		out = model.generate([random.randint(0, len(enc.vocab) + len(enc.special_tokens))], hyperparams["block_size"], device=device)[0].tolist()
