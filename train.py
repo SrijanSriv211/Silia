@@ -223,12 +223,12 @@ class dataloader:
 		x = torch.stack([data[i:i + self.block_size] for i in ix])
 		y = torch.stack([data[i+1:i+1 + self.block_size] for i in ix])
 
-        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-	    if device == "cuda":
-	        return = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+		# pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
+		if device == "cuda":
+			return = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
 
-	    else:
-	        return = x.to(device), y.to(device)
+		else:
+			return = x.to(device), y.to(device)
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -339,8 +339,8 @@ for _ in range(n_steps):
 			# scale the loss to account for gradient accumulation
 			loss = loss / CONFIG["gradient_accumulation_steps"]
 
-        # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
+		# backward pass, with gradient scaling if training in fp16
+		scaler.scale(loss).backward()
 
 	torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
@@ -353,9 +353,9 @@ for _ in range(n_steps):
 	for o in optimizers:
 		o.step()
 
-    # step the optimizer and scaler if training in fp16
-    scaler.step(optimizer)
-    scaler.update()
+	# step the optimizer and scaler if training in fp16
+	scaler.step(optimizer)
+	scaler.update()
 
 	# flush the gradients as soon as we can, no need for this memory anymore
 	optimizers[0].zero_grad(set_to_none=True)
