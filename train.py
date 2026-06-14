@@ -225,10 +225,10 @@ class dataloader:
 
 		# pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
 		if device == "cuda":
-			return = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+			return x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
 
 		else:
-			return = x.to(device), y.to(device)
+			return x.to(device), y.to(device)
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
