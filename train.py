@@ -177,7 +177,7 @@ if optimizer_hyperparams["use_muon"]:
 	optimizers.append(optimizer2)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.amp.GradScaler(enabled=(dtype == 'float16'))
+scaler = torch.amp.GradScaler("cude", enabled=(dtype == 'float16'))
 
 # load optimizer(s) state dict if loading from checkpoint
 if checkpoint is not None:
@@ -345,7 +345,8 @@ for _ in range(n_steps):
 
 	## clip the gradient
 	if CONFIG["grad_clip"] != 0.0:
-		scaler.unscale_(optimizer)
+		for o in optimizers:
+			scaler.unscale_(o)
 		torch.nn.utils.clip_grad_norm_(model.parameters(), CONFIG["grad_clip"])
 
 	if optimizer_hyperparams["use_muon"]:
