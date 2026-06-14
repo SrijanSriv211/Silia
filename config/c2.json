@@ -39,7 +39,7 @@
 	"decay_lr": true,
 	"lr_decay_iters": 20000,
 	"learning_rate": 2e-3,
-	"cooldown_frac": 0.4,
+	"cooldown_frac": 0.2,
 	"warmup_iters": 1000,
 	"min_lr": 2e-4
 }
