@@ -288,8 +288,8 @@ print0(
 )
 
 # compile the model
-print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
-model = torch.compile(model, backend="eager")
+# print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
+# model = torch.compile(model, backend="eager")
 
 # training loop
 # start training the model
