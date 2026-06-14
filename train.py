@@ -108,11 +108,6 @@ log_path = CONFIG["checkpoints"]["path"]
 device = "cuda" if torch.cuda.is_available() else "cpu"
 init_from = CONFIG["init_from"][11:] if CONFIG["init_from"].startswith("pretrained,") else "scratch"
 
-# set dtype
-dtype = "bfloat16" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else "float16"
-ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
-ctx = torch.amp.autocast(device_type=device, dtype=ptdtype)
-
 # print the device
 print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
 print0("Training on", f"{Fore.YELLOW}{Style.BRIGHT}{device}", log_path=log_path)
@@ -223,8 +218,7 @@ def estimate_loss(model, next_batch):
 		losses = torch.zeros(CONFIG["eval_iters"])
 		for k in track(range(CONFIG["eval_iters"]), description=f"{Fore.WHITE}{Style.BRIGHT}calc {Fore.WHITE}{Style.DIM}{split} loss{Style.RESET_ALL}"):
 			X, Y = next_batch(split)
-			with ctx:
-				_, loss = model(X, Y)
+			_, loss = model(X, Y)
 			losses[k] = loss.item()
 		out[split] = losses.mean()
 	model.train()
@@ -313,13 +307,10 @@ for _ in range(n_steps):
 	# training section
 	for _ in range(CONFIG["gradient_accumulation_steps"]):
 		X, Y = dataset.next_batch("train")
-		with ctx:
-			_, loss = model(X, Y)
-
-			# scale the loss to account for gradient accumulation
-			loss = loss / CONFIG["gradient_accumulation_steps"]
-		# backward pass
-		loss.backward()
+		_, loss = model(X, Y)
+		# scale the loss to account for gradient accumulation
+		loss = loss / CONFIG["gradient_accumulation_steps"]
+		loss.backward() # backward pass
 	torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
 	if optimizer_hyperparams["use_muon"]:
