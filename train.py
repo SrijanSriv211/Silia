@@ -6,13 +6,12 @@ from encoder import Encoder
 from optimizer import Muon
 
 from colorama import Style, Fore, init
+from contextlib import nullcontext
 from rich.progress import track
 from itertools import chain
 
 import random, pickle, torch, regex, json, time, math, sys
 
-# torch._inductor.config.coordinate_descent_tuning = True
-# torch._dynamo.config.compiled_autograd = True
 init(autoreset=True)
 
 # load config
@@ -107,9 +106,19 @@ if not os.path.isdir(CONFIG["checkpoints"]["path"]):
 	os.mkdir(CONFIG["checkpoints"]["path"])
 log_path = CONFIG["checkpoints"]["path"]
 
+# cuda backends
+torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+
 # set device
 device = "cuda" if torch.cuda.is_available() else "cpu"
 init_from = CONFIG["init_from"][11:] if CONFIG["init_from"].startswith("pretrained,") else "scratch"
+
+# "float32", "bfloat16", or "float16", the latter will auto implement a GradScaler
+dtype = "bfloat16" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else "float16"
+# note: float16 data type will automatically use a GradScaler
+ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
+ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device, dtype=ptdtype)
 
 # print the device
 print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
@@ -166,6 +175,9 @@ if optimizer_hyperparams["use_muon"]:
 	)
 	optimizers.append(optimizer2)
 
+# initialize a GradScaler. If enabled=False scaler is a no-op
+scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
+
 # load optimizer(s) state dict if loading from checkpoint
 if checkpoint is not None:
 	for o, s in zip(optimizers, checkpoint["optimizers"]):
@@ -187,18 +199,18 @@ class dataloader:
 				dataset = pickle.load(f)["dataset"]
 
 			random.shuffle(dataset)
-			# flat_dataset = chain.from_iterable(dataset)
-			for data in dataset:
-				n_train_toks = int(len(data) * self.data_division)
-				self.train.extend(data[:n_train_toks])
-				self.val.extend(data[n_train_toks:])
+			flat_dataset = chain.from_iterable(dataset)
+			# for data in dataset:
+			# 	n_train_toks = int(len(data) * self.data_division)
+			# 	self.train.extend(data[:n_train_toks])
+			# 	self.val.extend(data[n_train_toks:])
 			del dataset
 
-			# flat_dataset = list(flat_dataset)
-			# n_train_toks = int(len(flat_dataset) * self.data_division)
+			flat_dataset = list(flat_dataset)
+			n_train_toks = int(len(flat_dataset) * self.data_division)
 
-			# self.train.extend(flat_dataset[:n_train_toks])
-			# self.val.extend(flat_dataset[n_train_toks:])
+			self.train.extend(flat_dataset[:n_train_toks])
+			self.val.extend(flat_dataset[n_train_toks:])
 
 		n_train_toks, n_val_toks = len(self.train), len(self.val)
 		self.train = torch.tensor(self.train, dtype=torch.int64)
@@ -210,7 +222,13 @@ class dataloader:
 		ix = torch.randint(len(data) - self.block_size, (self.batch_size,))
 		x = torch.stack([data[i:i + self.block_size] for i in ix])
 		y = torch.stack([data[i+1:i+1 + self.block_size] for i in ix])
-		return x.to(device), y.to(device)
+
+        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
+	    if device == "cuda":
+	        return = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+
+	    else:
+	        return = x.to(device), y.to(device)
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -221,7 +239,8 @@ def estimate_loss(model, next_batch):
 		losses = torch.zeros(CONFIG["eval_iters"])
 		for k in track(range(CONFIG["eval_iters"]), description=f"{Fore.WHITE}{Style.BRIGHT}calc {Fore.WHITE}{Style.DIM}{split} loss{Style.RESET_ALL}"):
 			X, Y = next_batch(split)
-			_, loss = model(X, Y)
+			with ctx:
+				_, loss = model(X, Y)
 			losses[k] = loss.item()
 		out[split] = losses.mean()
 	model.train()
@@ -236,12 +255,9 @@ def get_state(model: Silia, optimizers: list[torch.optim.AdamW, Muon]):
 			state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
 
 	return {
-		"stats": stats,
 		"device": device,
 		"model": state_dict,
-		"hyperparams": hyperparams,
-		"optimizer_hyperparams": optimizer_hyperparams,
-		"optimizers": [o.state_dict() for o in optimizers]
+		"hyperparams": hyperparams
 	}
 
 # load encoder
@@ -271,8 +287,8 @@ print0(
 )
 
 # compile the model
-# print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
-# model = torch.compile(model)
+print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
+model = torch.compile(model, backend="aot_eager")
 
 # training loop
 # start training the model
@@ -317,13 +333,14 @@ for _ in range(n_steps):
 	# training section
 	for _ in range(CONFIG["gradient_accumulation_steps"]):
 		X, Y = dataset.next_batch("train")
-		_, loss = model(X, Y)
+		with ctx:
+			_, loss = model(X, Y)
 
-		# scale the loss to account for gradient accumulation
-		loss = loss / CONFIG["gradient_accumulation_steps"]
+			# scale the loss to account for gradient accumulation
+			loss = loss / CONFIG["gradient_accumulation_steps"]
 
-		# backward pass
-		loss.backward()
+        # backward pass, with gradient scaling if training in fp16
+        scaler.scale(loss).backward()
 
 	torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
@@ -336,7 +353,11 @@ for _ in range(n_steps):
 	for o in optimizers:
 		o.step()
 
-	## flush the gradients as soon as we can, no need for this memory anymore
+    # step the optimizer and scaler if training in fp16
+    scaler.step(optimizer)
+    scaler.update()
+
+	# flush the gradients as soon as we can, no need for this memory anymore
 	optimizers[0].zero_grad(set_to_none=True)
 	model.zero_grad(set_to_none=True)
 
