@@ -3,13 +3,48 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 from model import Silia, Config
 from encoder import Encoder
-from optimizer import Muon
+from optimizer import MuonDist, Muon
 
+from torch.distributed import init_process_group, destroy_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
 from colorama import Style, Fore, init
 from rich.progress import track
 from itertools import chain
 
 import random, pickle, torch, regex, json, time, math, sys
+
+def print0(*text, println=True, overwrite=False, save_to_file=True, log_path="bin"):
+	if println:
+		print(*text)
+
+	if not save_to_file:
+		return
+
+	# save cleaned text to the file
+	if not os.path.isdir(log_path):
+		os.mkdir(log_path)
+
+	with open(os.path.join(log_path, "out.txt"), "w" if overwrite else "a", encoding="utf-8") as f:
+		f.write(" ".join(tuple(ansi_escape.sub('', part) for part in text)) + "\n")
+
+# separate the integer part (for hours, minutes, and seconds) from the fractional part (for milliseconds)
+def calc_total_time(seconds):
+	sec_int, millis = divmod(seconds, 1)
+	millis = int(millis * 1000) # convert the fractional part to milliseconds
+
+	min, sec = divmod(int(sec_int), 60)
+	hour, min = divmod(min, 60)
+	hours, minutes, seconds = int(hour), int(min), int(sec)
+
+	t = [
+		f"{hours} hour" + ("s" if hours > 1 else "") if hours > 0 else None,
+		f"{minutes} minute" + ("s" if minutes > 1 else "") if minutes > 0 else None,
+		f"{seconds} second" + ("s" if seconds > 1 else "") if seconds > 0 else None,
+		f"{millis} ms" if millis > 0 else None
+	]
+	t = list(filter(None, t))
+
+	return ", ".join(t) if t else "0 seconds"
 
 # load config
 CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.argv) > 1 else {
@@ -62,55 +97,46 @@ CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.
 init(autoreset=True)
 ansi_escape = regex.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 
-def print0(*text, println=True, overwrite=False, save_to_file=True, log_path="bin"):
-	if println:
-		print(*text)
+# various inits, derived attributes, I/O setup
+ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
+if ddp:
+	init_process_group(backend='nccl')
+	ddp_rank = int(os.environ['RANK'])
+	ddp_local_rank = int(os.environ['LOCAL_RANK'])
+	ddp_world_size = int(os.environ['WORLD_SIZE'])
+	device = f'cuda:{ddp_local_rank}'
+	torch.cuda.set_device(device)
+	master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
+	seed_offset = ddp_rank # each process gets a different seed
 
-	if not save_to_file:
-		return
-
-	# save cleaned text to the file
-	if not os.path.isdir(log_path):
-		os.mkdir(log_path)
-
-	with open(os.path.join(log_path, "out.txt"), "w" if overwrite else "a", encoding="utf-8") as f:
-		f.write(" ".join(tuple(ansi_escape.sub('', part) for part in text)) + "\n")
-
-def calc_total_time(seconds):
-	# separate the integer part (for hours, minutes, and seconds) from the fractional part (for milliseconds)
-	sec_int, millis = divmod(seconds, 1)
-	millis = int(millis * 1000) # convert the fractional part to milliseconds
-
-	min, sec = divmod(int(sec_int), 60)
-	hour, min = divmod(min, 60)
-	hours, minutes, seconds = int(hour), int(min), int(sec)
-
-	t = [
-		f"{hours} hour" + ("s" if hours > 1 else "") if hours > 0 else None,
-		f"{minutes} minute" + ("s" if minutes > 1 else "") if minutes > 0 else None,
-		f"{seconds} second" + ("s" if seconds > 1 else "") if seconds > 0 else None,
-		f"{millis} ms" if millis > 0 else None
-	]
-	t = list(filter(None, t))
-
-	return ", ".join(t) if t else "0 seconds"
+# if not ddp, we are running on a single gpu, and one process
+else:
+	master_process = True
+	seed_offset = 0
+	ddp_world_size = 1
 
 # init seed
 if CONFIG["seed"] != "auto":
-	torch.manual_seed(CONFIG["seed"])
-	random.seed(CONFIG["seed"])
+	if torch.cuda.is_available():
+		torch.cuda.manual_seed(CONFIG["seed"] + seed_offset)
+	torch.manual_seed(CONFIG["seed"] + seed_offset)
+	random.seed(CONFIG["seed"] + seed_offset)
 
-if not os.path.isdir(CONFIG["checkpoints"]["path"]):
-	os.mkdir(CONFIG["checkpoints"]["path"])
+if master_process:
+	os.makedirs(CONFIG["checkpoints"]["path"], exist_ok=True)
 log_path = CONFIG["checkpoints"]["path"]
 
+torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+
 # set device
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device_type = "cuda" if torch.cuda.is_available() else "cpu"
 init_from = CONFIG["init_from"][11:] if CONFIG["init_from"].startswith("pretrained,") else "scratch"
 
 # print the device
-print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
-print0("Training on", f"{Fore.YELLOW}{Style.BRIGHT}{device}", log_path=log_path)
+if master_process:
+	print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
+	print0("Training on", f"{Fore.YELLOW}{Style.BRIGHT}{device_type}", log_path=log_path)
 
 # load stats
 checkpoint = None if init_from == "scratch" else torch.load(init_from)
@@ -132,7 +158,7 @@ model = Silia(conf)
 # load the state dict
 if checkpoint is not None:
 	model.load_state_dict(checkpoint["model"])
-model.to(device)
+model.to(device_type)
 
 # optimizers!
 optimizer_hyperparams = CONFIG["optimizer_hyperparams"] if checkpoint is None else checkpoint["optimizer_hyperparams"]
@@ -155,7 +181,8 @@ optimizer1 = torch.optim.AdamW(
 optimizers = [optimizer1]
 
 if optimizer_hyperparams["use_muon"]:
-	optimizer2 = Muon(
+	muon = MuonDist if ddp else Muon
+	optimizer2 = muon(
 		hidden_matrix_params,
 		lr=CONFIG["learning_rate"],
 		momentum=optimizer_hyperparams["momentum"],
@@ -207,7 +234,7 @@ class dataloader:
 		ix = torch.randint(len(data) - self.block_size, (self.batch_size,))
 		x = torch.stack([data[i:i + self.block_size] for i in ix])
 		y = torch.stack([data[i+1:i+1 + self.block_size] for i in ix])
-		return x.to(device), y.to(device)
+		return x.to(device_type), y.to(device_type)
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -224,7 +251,7 @@ def estimate_loss(model, next_batch):
 	model.train()
 	return out
 
-def get_state(model: Silia, optimizers: list[torch.optim.AdamW, Muon]):
+def get_state(model, optimizers):
 	state_dict = model.state_dict()
 	unwanted_prefix = '_orig_mod.'
 
@@ -233,7 +260,7 @@ def get_state(model: Silia, optimizers: list[torch.optim.AdamW, Muon]):
 			state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
 
 	return {
-		"device": device,
+		"device": device_type,
 		"model": state_dict,
 		"hyperparams": hyperparams
 	}
@@ -250,26 +277,33 @@ dataset = dataloader(
 )
 n_train_toks, n_val_toks = dataset.load_dataset()
 
-print0(f"{Fore.WHITE}{Style.BRIGHT}{((n_train_toks + n_val_toks)/1e6)}M", "total tokens", log_path=log_path)
-print0(
-	f"{Fore.WHITE}{Style.BRIGHT}{(n_train_toks/1e6)}M", "train tokens,",
-	f"{Fore.WHITE}{Style.BRIGHT}{(n_val_toks/1e6)}M", "val tokens",
-	log_path=log_path
-)
+if master_process:
+	print0(f"{Fore.WHITE}{Style.BRIGHT}{((n_train_toks + n_val_toks)/1e6)}M", "total tokens", log_path=log_path)
+	print0(
+		f"{Fore.WHITE}{Style.BRIGHT}{(n_train_toks/1e6)}M", "train tokens,",
+		f"{Fore.WHITE}{Style.BRIGHT}{(n_val_toks/1e6)}M", "val tokens",
+		log_path=log_path
+	)
 
-# report number of parameters
-print0(
-	f"{Fore.WHITE}{Style.BRIGHT}{sum(p.numel() for p in model.parameters())/1e6}M", "parameters,",
-	f"{Fore.WHITE}{Style.BRIGHT}{sum(p.numel() for p in model.blocks.parameters())/1e6}M", "non-embedding parameters",
-	log_path=log_path
-)
+	# report number of parameters
+	print0(
+		f"{Fore.WHITE}{Style.BRIGHT}{sum(p.numel() for p in model.parameters())/1e6}M", "parameters,",
+		f"{Fore.WHITE}{Style.BRIGHT}{sum(p.numel() for p in model.blocks.parameters())/1e6}M", "non-embedding parameters",
+		log_path=log_path
+	)
 
-# training loop
-# start training the model
-print0("started training", log_path=log_path)
+	# training loop
+	# start training the model
+	print0("started training", log_path=log_path)
+
+# wrap model into DDP container
+if ddp:
+	model = DDP(model, device_ids=[ddp_local_rank])
+
 start_time = eval_t0 = test_t0 = time.time()
 n_steps = CONFIG["max_iters"] - stats["step"] + 1
 steps_per_epoch = int((n_train_toks + n_val_toks) / (hyperparams["block_size"] * CONFIG["batch_size"]))
+raw_model = model.module if ddp else model # unwrap DDP container if needed
 
 for _ in range(n_steps):
 	# determine and set the learning rate for this iteration
@@ -305,8 +339,14 @@ for _ in range(n_steps):
 	stats["lr"].append(lr)
 
 	# training section
-	for _ in range(CONFIG["gradient_accumulation_steps"]):
+	for micro_step in range(CONFIG["gradient_accumulation_steps"]):
 		X, Y = dataset.next_batch("train")
+		# in DDP training we only need to sync gradients at the last micro step.
+		# the official way to do this is with model.no_sync() context manager, but
+		# I really dislike that this bloats the code and forces us to repeat code
+		# looking at the source of that context manager, it just toggles this variable
+		if ddp:
+			model.require_backward_grad_sync = (micro_step == CONFIG["gradient_accumulation_steps"] - 1)
 		_, loss = model(X, Y)
 		# scale the loss to account for gradient accumulation
 		loss = loss / CONFIG["gradient_accumulation_steps"]
@@ -328,14 +368,14 @@ for _ in range(n_steps):
 
 	# validation section
 	## save checkpoint
-	if CONFIG["checkpoints"]["create_checkpoints"] and stats["step"] > 0 and stats["step"] % CONFIG["checkpoints"]["interval"] == 0:
+	if CONFIG["checkpoints"]["create_checkpoints"] and stats["step"] > 0 and stats["step"] % CONFIG["checkpoints"]["interval"] == 0 and master_process:
 		print0(f"saved checkpoint at step {Fore.WHITE}{Style.BRIGHT}{stats["step"]}", log_path=log_path)
-		torch.save(get_state(model, optimizers), f"{CONFIG["checkpoints"]["path"]}/step{stats["step"]}.bin")
+		torch.save(get_state(raw_model, optimizers), f"{CONFIG["checkpoints"]["path"]}/step{stats["step"]}.bin")
 		with open(f"{CONFIG["checkpoints"]["path"]}/step{stats["step"]}.json", "w", encoding="utf-8") as f:
 			json.dump(stats, f, indent=4)
 
 	## log train-val loss
-	if stats["step"] > 0 and stats["step"] % CONFIG["eval_interval"] == 0:
+	if stats["step"] > 0 and stats["step"] % CONFIG["eval_interval"] == 0 and master_process:
 		losses = estimate_loss(model, dataset.next_batch)
 		eval_t1 = time.time()
 		eval_dt = eval_t1 - eval_t0
@@ -358,7 +398,7 @@ for _ in range(n_steps):
 		stats["loss"]["val"].append(losses["val"].item())
 
 		### sample generation
-		out = model.generate([random.randint(0, len(enc.vocab) + len(enc.special_tokens))], hyperparams["block_size"], device=device)[0].tolist()
+		out = raw_model.generate([random.randint(0, len(enc.vocab) + len(enc.special_tokens))], hyperparams["block_size"], device=device_type)[0].tolist()
 		print0(f"{Fore.WHITE}{Style.DIM}```\n{enc.decode(out)}\n```", log_path=log_path)
 
 	## log test loss
@@ -367,7 +407,7 @@ for _ in range(n_steps):
 	lossf = loss.item() * CONFIG["gradient_accumulation_steps"]
 	stats["loss"]["test"].append(lossf)
 
-	if stats["step"] % CONFIG["log_interval"] == 0:
+	if stats["step"] % CONFIG["log_interval"] == 0 and master_process:
 		test_t1 = time.time()
 		test_dt = test_t1 - test_t0
 		test_t0 = test_t1
@@ -390,3 +430,6 @@ print0("total time:", calc_total_time(time.time() - start_time), log_path=log_pa
 torch.save(get_state(model, optimizers), f"{CONFIG["checkpoints"]["path"]}/final.bin")
 with open(f"{CONFIG["checkpoints"]["path"]}/final.json", "w", encoding="utf-8") as f:
 	json.dump(stats, f, indent=4)
+
+if ddp:
+	destroy_process_group()
