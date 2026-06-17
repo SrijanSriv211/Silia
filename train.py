@@ -369,9 +369,9 @@ for _ in range(n_steps):
 	# validation section
 	## save checkpoint
 	if CONFIG["checkpoints"]["create_checkpoints"] and stats["step"] > 0 and stats["step"] % CONFIG["checkpoints"]["interval"] == 0 and master_process:
-		print0(f"saved checkpoint at step {Fore.WHITE}{Style.BRIGHT}{stats["step"]}", log_path=log_path)
-		torch.save(get_state(raw_model, optimizers), f"{CONFIG["checkpoints"]["path"]}/step{stats["step"]}.bin")
-		with open(f"{CONFIG["checkpoints"]["path"]}/step{stats["step"]}.json", "w", encoding="utf-8") as f:
+		print0(f"saved checkpoint at step {Fore.WHITE}{Style.BRIGHT}{stats['step']}", log_path=log_path)
+		torch.save(get_state(raw_model, optimizers), f"{CONFIG['checkpoints']['path']}/step{stats['step']}.bin")
+		with open(f"{CONFIG['checkpoints']['path']}/step{stats['step']}.json", "w", encoding="utf-8") as f:
 			json.dump(stats, f, indent=4)
 
 	## log train-val loss
@@ -383,11 +383,11 @@ for _ in range(n_steps):
 
 		print0(
 			f"{Fore.WHITE}{Style.BRIGHT}step",
-			f"{Fore.WHITE}{Style.DIM}[{stats["step"]}/{CONFIG["max_iters"]}]"
+			f"{Fore.WHITE}{Style.DIM}[{stats['step']}/{CONFIG['max_iters']}]"
 			f"{Fore.RESET}{Style.RESET_ALL}:",
-			f"train loss {Fore.WHITE}{Style.BRIGHT}{losses["train"]:.4f}"
+			f"train loss {Fore.WHITE}{Style.BRIGHT}{losses['train']:.4f}"
 			f"{Fore.RESET}{Style.RESET_ALL},",
-			f"val loss {Fore.WHITE}{Style.BRIGHT}{losses["val"]:.4f}"
+			f"val loss {Fore.WHITE}{Style.BRIGHT}{losses['val']:.4f}"
 			f"{Fore.RESET}{Style.RESET_ALL},",
 			f"lr {Fore.WHITE}{Style.BRIGHT}{lr:.7f}"
 			f"{Fore.RESET}{Style.RESET_ALL},",
@@ -415,7 +415,7 @@ for _ in range(n_steps):
 		toks_per_sec = (CONFIG["batch_size"] * CONFIG["gradient_accumulation_steps"] * hyperparams["block_size"] * CONFIG["log_interval"]) / test_dt
 		print0(
 			f"{Fore.WHITE}{Style.BRIGHT}iter",
-			f"{Fore.WHITE}{Style.DIM}[{stats["step"]}/{CONFIG["max_iters"]}]"
+			f"{Fore.WHITE}{Style.DIM}[{stats['step']}/{CONFIG['max_iters']}]"
 			f"{Fore.RESET}{Style.RESET_ALL}:",
 			f"loss {Fore.WHITE}{Style.BRIGHT}{lossf:.4f}"
 			f"{Fore.RESET}{Style.RESET_ALL},",
@@ -427,8 +427,8 @@ for _ in range(n_steps):
 	stats["step"] += 1
 
 print0("total time:", calc_total_time(time.time() - start_time), log_path=log_path)
-torch.save(get_state(model, optimizers), f"{CONFIG["checkpoints"]["path"]}/final.bin")
-with open(f"{CONFIG["checkpoints"]["path"]}/final.json", "w", encoding="utf-8") as f:
+torch.save(get_state(model, optimizers), f"{CONFIG['checkpoints']['path']}/final.bin")
+with open(f"{CONFIG['checkpoints']['path']}/final.json", "w", encoding="utf-8") as f:
 	json.dump(stats, f, indent=4)
 
 if ddp:
