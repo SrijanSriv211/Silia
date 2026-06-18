@@ -35,7 +35,7 @@ class CausalSelfAttention(nn.Module):
 		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
 		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		q, k, v = self.qkv(norm(x)).view(B, T, self.n_head, self.n_embd).chunk(3, dim=-1)
+		q, k, v = self.qkv(norm(x)).view(B, T, self.n_head, 3*self.n_embd).chunk(3, dim=-1)
 
 		# apply rotary embeddings to queries and keys to get relative positional encoding
 		cos, sin = cos_sin
@@ -57,7 +57,7 @@ class SwiGLU(nn.Module):
 		super().__init__()
 		d_model = config.n_embd * config.n_head
 
-		self.uv = nn.Linear(d_model, 4*d_model, bias=False)
+		self.uv = nn.Linear(d_model, 2*4*d_model, bias=False)
 		self.out = nn.Linear(4*d_model, d_model, bias=False)
 
 	def forward(self, x, cos_sin):
