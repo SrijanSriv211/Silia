@@ -66,7 +66,7 @@ class Block(nn.Module):
 	def __init__(self, config: Config):
 		super().__init__()
 		# two-thirds trick for hidden dimension to keep compute constant
-		d_model = self.n_embd * self.n_head
+		d_model = config.n_embd * config.n_head
 		d_hidden = int(d_model * 4 / 3)
 
 		self.attn1 = CausalSelfAttention(config, (d_model, d_hidden), 2)
@@ -82,12 +82,13 @@ class Silia(nn.Module):
 		super().__init__()
 		assert config.vocab_size is not None
 		assert config.block_size is not None
+		d_model = config.n_embd * config.n_head
 		self.config = config
 
 		# factorized token embeddings
-		self.embed = nn.Embedding(config.vocab_size, config.n_embd)
+		self.embed = nn.Embedding(config.vocab_size, d_model)
 		self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
-		self.unembed = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+		self.unembed = nn.Linear(d_model, config.vocab_size, bias=False)
 		self.embed.weight = self.unembed.weight
 
 		# to support meta device initialization, we init the rotary embeddings here, but it's fake
