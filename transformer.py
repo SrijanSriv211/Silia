@@ -60,7 +60,7 @@ class SwiGLU(nn.Module):
 		self.uv = nn.Linear(d_model, 2*4*d_model, bias=False)
 		self.out = nn.Linear(4*d_model, d_model, bias=False)
 
-	def forward(self, x, cos_sin):
+	def forward(self, x):
 		u, v = self.uv(norm(x)).chunk(2, dim=-1)
 		y = u * F.silu(v)
 		return self.out(y)
