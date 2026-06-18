@@ -20,4 +20,4 @@ enc.train(text, vocab_size)
 enc.register_special_tokens(*special_tokens)
 enc.save(outpath)
 
-print("Special Tokens:\n" + enc.special_tokens)
+print("Special Tokens:\n", enc.special_tokens)
