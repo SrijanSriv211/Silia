@@ -22,7 +22,7 @@ def apply_rotary_emb(x, cos, sin):
 	return torch.cat([y1, y2], 3)
 
 class CausalSelfAttention(nn.Module):
-	def __init__(self, config: Config):
+	def __init__(self, config: GPTConfig):
 		super().__init__()
 		self.n_head = config.n_head
 		self.n_embd = config.n_embd
@@ -53,7 +53,7 @@ class CausalSelfAttention(nn.Module):
 		return self.out(y)
 
 class SwiGLU(nn.Module):
-	def __init__(self, config: Config):
+	def __init__(self, config: GPTConfig):
 		super().__init__()
 		d_model = self.n_embd * self.n_head
 
@@ -66,7 +66,7 @@ class SwiGLU(nn.Module):
 		return self.out(y)
 
 class Block(nn.Module):
-	def __init__(self, config: Config):
+	def __init__(self, config: GPTConfig):
 		super().__init__()
 		self.attn = CausalSelfAttention(config)
 		self.swiglu = SwiGLU(config)
@@ -76,7 +76,7 @@ class Block(nn.Module):
 		return y + self.swiglu(y)
 
 class GPT(nn.Module):
-	def __init__(self, config: Config):
+	def __init__(self, config: GPTConfig):
 		super().__init__()
 		assert config.vocab_size is not None
 		assert config.block_size is not None
