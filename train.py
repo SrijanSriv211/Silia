@@ -131,16 +131,26 @@ torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 
 # set device
 device_type = "cuda" if torch.cuda.is_available() else "cpu"
-init_from = CONFIG["init_from"][11:] if CONFIG["init_from"].startswith("pretrained,") else "scratch"
+init_from = CONFIG["init_from"][11:].strip("/") if CONFIG["init_from"].startswith("pretrained,") else "scratch"
 
 # print the device
 if master_process:
 	print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
 	print0("Training on", f"{Fore.YELLOW}{Style.BRIGHT}{device_type}", log_path=log_path)
 
+# load model, optimizer & stats if asked
+stats_checkpoint = None
+model_checkpoint = None
+optimizer_checkpoint = None
+
+if init_from != "scratch" and os.path.isdir(init_from):
+	model_checkpoint = torch.load(f"{init_from}/model.bin")
+	optimizer_checkpoint = torch.load(f"{init_from}/optimizer.bin")
+	with open(f"{init_from}/stats.json", "r", encoding="utf-8") as f:
+		stats_checkpoint = json.load(f)
+
 # load stats
-checkpoint = None if init_from == "scratch" else torch.load(init_from)
-stats = checkpoint["stats"] if checkpoint is not None and "stats" in checkpoint.keys() else {
+stats = stats_checkpoint if stats_checkpoint is not None else {
 	"step": 0,
 	"loss": {
 		"train": [],
@@ -151,17 +161,17 @@ stats = checkpoint["stats"] if checkpoint is not None and "stats" in checkpoint.
 }
 
 # create an instance of Silia
-hyperparams = CONFIG["model_hyperparams"] if checkpoint is None else checkpoint["hyperparams"]
+hyperparams = CONFIG["model_hyperparams"] if model_checkpoint is None else model_checkpoint["hyperparams"]
 conf = Config(**hyperparams)
 model = Silia(conf)
 
 # load the state dict
-if checkpoint is not None:
-	model.load_state_dict(checkpoint["model"])
+if model_checkpoint is not None:
+	model.load_state_dict(model_checkpoint["model"])
 model.to(device_type)
 
 # optimizers!
-optimizer_hyperparams = CONFIG["optimizer_hyperparams"] if checkpoint is None else checkpoint["optimizer_hyperparams"]
+optimizer_hyperparams = CONFIG["optimizer_hyperparams"] if optimizer_checkpoint is None else optimizer_checkpoint["hyperparams"]
 
 # collect the parameters to optimize
 hidden_matrix_params = [p for n, p in model.blocks.named_parameters() if p.ndim >= 2 and "embed" not in n]
@@ -191,8 +201,8 @@ if optimizer_hyperparams["use_muon"]:
 	optimizers.append(optimizer2)
 
 # load optimizer(s) state dict if loading from checkpoint
-if checkpoint is not None:
-	for o, s in zip(optimizers, checkpoint["optimizers"]):
+if optimizer_checkpoint is not None:
+	for o, s in zip(optimizers, optimizer_checkpoint["model"]):
 		o.load_state_dict(s)
 
 class dataloader:
@@ -212,10 +222,6 @@ class dataloader:
 
 			random.shuffle(dataset)
 			flat_dataset = chain.from_iterable(dataset)
-			# for data in dataset:
-			# 	n_train_toks = int(len(data) * self.data_division)
-			# 	self.train.extend(data[:n_train_toks])
-			# 	self.val.extend(data[n_train_toks:])
 			del dataset
 
 			flat_dataset = list(flat_dataset)
@@ -251,8 +257,15 @@ def estimate_loss(model, next_batch):
 	model.train()
 	return out
 
-def get_state(model, optimizers):
-	state_dict = model.state_dict()
+def get_state(model, type):
+	if type == "model":
+		state_dict = model.state_dict()
+		hp = hyperparams
+
+	elif type == "optimizer":
+		state_dict = [o.state_dict() for o in optimizers]
+		hp = optimizer_hyperparams
+
 	unwanted_prefix = '_orig_mod.'
 
 	for k, v in list(state_dict.items()):
@@ -262,7 +275,7 @@ def get_state(model, optimizers):
 	return {
 		"device": device_type,
 		"model": state_dict,
-		"hyperparams": hyperparams
+		"hyperparams": hp
 	}
 
 # load encoder
@@ -303,9 +316,11 @@ if ddp:
 start_time = eval_t0 = test_t0 = time.time()
 n_steps = CONFIG["max_iters"] - stats["step"] + 1
 steps_per_epoch = int((n_train_toks + n_val_toks) / (hyperparams["block_size"] * CONFIG["batch_size"]))
-raw_model = model.module if ddp else model # unwrap DDP container if needed
 
 for _ in range(n_steps):
+	# unwrap DDP container if needed
+	raw_model = model.module if ddp else model
+
 	# determine and set the learning rate for this iteration
 	## learning rate decay scheduler (cosine with warmup)
 	if not CONFIG["decay_lr"]:
@@ -370,8 +385,15 @@ for _ in range(n_steps):
 	## save checkpoint
 	if CONFIG["checkpoints"]["create_checkpoints"] and stats["step"] > 0 and stats["step"] % CONFIG["checkpoints"]["interval"] == 0 and master_process:
 		print0(f"saved checkpoint at step {Fore.WHITE}{Style.BRIGHT}{stats['step']}", log_path=log_path)
-		torch.save(get_state(raw_model, optimizers), f"{CONFIG['checkpoints']['path']}/step{stats['step']}.bin")
-		with open(f"{CONFIG['checkpoints']['path']}/step{stats['step']}.json", "w", encoding="utf-8") as f:
+		ck_save_path = f"{CONFIG['checkpoints']['path']}/step{stats['step']}"
+
+		# create folder for every checkpoint
+		os.makedirs(ck_save_path, exist_ok=True)
+
+		# save model, optimizer & stats
+		torch.save(get_state(raw_model, "model"), f"{ck_save_path}/model.bin")
+		torch.save(get_state(optimizers, "optimizer"), f"{ck_save_path}/optimizer.bin")
+		with open(f"{ck_save_path}/stats.json", "w", encoding="utf-8") as f:
 			json.dump(stats, f, indent=4)
 
 	## log train-val loss
@@ -426,10 +448,8 @@ for _ in range(n_steps):
 		)
 	stats["step"] += 1
 
-print0("total time:", calc_total_time(time.time() - start_time), log_path=log_path)
-torch.save(get_state(model, optimizers), f"{CONFIG['checkpoints']['path']}/final.bin")
-with open(f"{CONFIG['checkpoints']['path']}/final.json", "w", encoding="utf-8") as f:
-	json.dump(stats, f, indent=4)
+if master_process:
+	print0("total time:", calc_total_time(time.time() - start_time), log_path=log_path)
 
 if ddp:
 	destroy_process_group()
