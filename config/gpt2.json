@@ -10,7 +10,7 @@
 		"create_checkpoints": true
 	},
 	"model_hyperparams": {
-		"vocab_size": 16384,
+		"vocab_size": 12288,
 		"block_size": 1024,
 		"n_layer": 7,
 		"n_head": 4,
