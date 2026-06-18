@@ -116,13 +116,6 @@ else:
 	seed_offset = 0
 	ddp_world_size = 1
 
-# init seed
-if CONFIG["seed"] != "auto":
-	if torch.cuda.is_available():
-		torch.cuda.manual_seed(CONFIG["seed"] + seed_offset)
-	torch.manual_seed(CONFIG["seed"] + seed_offset)
-	random.seed(CONFIG["seed"] + seed_offset)
-
 if master_process:
 	os.makedirs(CONFIG["checkpoints"]["path"], exist_ok=True)
 log_path = CONFIG["checkpoints"]["path"]
@@ -133,6 +126,16 @@ torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 # set device
 device_type = "cuda" if torch.cuda.is_available() else "cpu"
 init_from = CONFIG["init_from"][11:].strip("/") if CONFIG["init_from"].startswith("pretrained,") else "scratch"
+init_seed_offset = random.randint(1, 2000) if CONFIG["init_from"].startswith("pretrained,") else 0
+
+# init seed
+if CONFIG["seed"] != "auto":
+	seed = CONFIG["seed"] + init_seed_offset + seed_offset
+
+	if torch.cuda.is_available():
+		torch.cuda.manual_seed(seed)
+	torch.manual_seed(seed)
+	random.seed(seed)
 
 # print the device
 if master_process:
@@ -270,15 +273,15 @@ def get_state(model, type):
 		state_dict = model.state_dict()
 		hp = hyperparams
 
+		unwanted_prefix = '_orig_mod.'
+
+		for k, v in list(state_dict.items()):
+			if k.startswith(unwanted_prefix):
+				state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+
 	elif type == "optimizer":
-		state_dict = [o.state_dict() for o in optimizers]
+		state_dict = [o.state_dict() for o in model]
 		hp = optimizer_hyperparams
-
-	unwanted_prefix = '_orig_mod.'
-
-	for k, v in list(state_dict.items()):
-		if k.startswith(unwanted_prefix):
-			state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
 
 	return {
 		"device": device_type,
