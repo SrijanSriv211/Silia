@@ -3,8 +3,8 @@ import pandas as pd, os
 
 special_tokens = ["<|sink|>", "<|eop|>", "<|eot|>"]
 dataset_path = "data/fineweb-edu-100M/train-00000-of-00002.parquet"
-outpath = "bin/o16k.bin"
-vocab_size = 16384 - len(special_tokens)
+outpath = "bin/o12k.bin"
+vocab_size = 12288 - len(special_tokens)
 
 dir = os.path.split(outpath)[0]
 if not os.path.isdir(dir):

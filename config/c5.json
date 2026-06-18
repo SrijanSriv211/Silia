@@ -10,9 +10,9 @@
 		"create_checkpoints": true
 	},
 	"model_hyperparams": {
-		"vocab_size": 16384,
+		"vocab_size": 12288,
 		"block_size": 1024,
-		"n_layer": 4,
+		"n_layer": 8,
 		"n_head": 16,
 		"n_embd": 128
 	},
@@ -24,7 +24,7 @@
 		"use_muon": true,
 		"momentum": 0.95
 	},
-	"encoder_path": "bin/cl16k.bin",
+	"encoder_path": "bin/o12k.bin",
 	"init_from": "scratch",
 	"seed": 18,
 

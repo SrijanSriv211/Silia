@@ -9,7 +9,7 @@ dataset_path = [
 	"data/fineweb-edu-100M/train-00000-of-00002.parquet",
 	"data/fineweb-edu-100M/train-00001-of-00002.parquet"
 ]
-enc_path = "bin/o16k.bin"
+enc_path = "bin/o12k.bin"
 
 enc = Encoder()
 enc.load(enc_path)
