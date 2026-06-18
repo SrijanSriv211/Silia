@@ -4,6 +4,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from model import Silia, Config
 from encoder import Encoder
 from optimizer import MuonDist, Muon
+from transformer import GPTConfig, GPT
 
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -160,10 +161,17 @@ stats = stats_checkpoint if stats_checkpoint is not None else {
 	"lr": []
 }
 
-# create an instance of Silia
+# create an instance of the model
 hyperparams = CONFIG["model_hyperparams"] if model_checkpoint is None else model_checkpoint["hyperparams"]
-conf = Config(**hyperparams)
-model = Silia(conf)
+
+arch = sys.argv[2]
+if arch == "silia":
+	conf = Config(**hyperparams)
+	model = Silia(conf)
+
+elif arch == "gpt":
+	conf = GPTConfig(**hyperparams)
+	model = GPT(conf)
 
 # load the state dict
 if model_checkpoint is not None:
