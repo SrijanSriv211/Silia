@@ -55,7 +55,7 @@ class CausalSelfAttention(nn.Module):
 class SwiGLU(nn.Module):
 	def __init__(self, config: GPTConfig):
 		super().__init__()
-		d_model = self.n_embd * self.n_head
+		d_model = config.n_embd * config.n_head
 
 		self.uv = nn.Linear(d_model, 4*d_model, bias=False)
 		self.out = nn.Linear(4*d_model, d_model, bias=False)
@@ -81,7 +81,7 @@ class GPT(nn.Module):
 		assert config.vocab_size is not None
 		assert config.block_size is not None
 		self.config = config
-		d_model = self.n_embd * self.n_head
+		d_model = config.n_embd * config.n_head
 
 		# factorized token embeddings
 		self.embed = nn.Embedding(config.vocab_size, d_model)
