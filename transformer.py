@@ -94,7 +94,7 @@ class GPT(nn.Module):
 		# so let's just over-compute them, but assert fail if we ever reach that amount.
 		# in the future we can dynamically grow the cache, for now it's fine.
 		self.rotary_block_size = config.block_size * 10 # 10X over-compute should be enough, TODO make nicer?
-		cos, sin = self._precompute_rotary_embeddings(self.rotary_block_size, d_model)
+		cos, sin = self._precompute_rotary_embeddings(self.rotary_block_size, config.n_embd)
 		self.register_buffer("cos", cos, persistent=False) # persistent=False means it's not saved to the checkpoint
 		self.register_buffer("sin", sin, persistent=False)
 
