@@ -135,34 +135,33 @@ _Exclusive Gated Attention_ brings the best of both worlds.
 Let's see what _XGA_ looks like in code (including RoPE and QK-Norm).
 
 ```python
-	def forward(self, x, cos_sin):
-		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
-		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		q, k, v, g = self.qkv(x).view(B, T, self.n_head, -1).chunk(4, dim=-1)
+# calculate query, key, values for all heads in batch and move head forward to be the batch dim
+q, k, v, g = self.qkv(x).view(B, T, self.n_head, -1).chunk(4, dim=-1)
 
-		# apply rotary embeddings to queries and keys to get relative positional encoding
-		cos, sin = cos_sin
-		q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
-		q, k = norm(q), norm(k) # QK norm
+# apply rotary embeddings to queries and keys to get relative positional encoding
+cos, sin = cos_sin
+q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
+q, k = norm(q), norm(k) # QK norm
 
-		# make head be batch dim, i.e. (B, T, nh, hs) -> (B, nh, T, hs)
-		q, k, v, g = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), g.transpose(1, 2)
+# make head be batch dim, i.e. (B, T, nh, hs) -> (B, nh, T, hs)
+q, k, v, g = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), g.transpose(1, 2)
 
-		# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-		y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
 
-		# apply gated attention
-		# https://arxiv.org/pdf/2505.06708
-		y = y * F.sigmoid(g)
+# apply gated attention
+# https://arxiv.org/pdf/2505.06708
+y = y * F.sigmoid(g)
 
-		# XSA mode
-		# https://arxiv.org/pdf/2603.09078
-		vn = torch.nn.functional.normalize(v, dim=-1)
-		y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
+# XSA mode
+# https://arxiv.org/pdf/2603.09078
+vn = torch.nn.functional.normalize(v, dim=-1)
+y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
 
-		# re-assemble all head outputs side by side
-		return y.transpose(1, 2).contiguous().view(B, T, -1)
+# re-assemble all head outputs side by side
+return y.transpose(1, 2).contiguous().view(B, T, -1)
 ```
 
 #### 4.2.3. Silia
