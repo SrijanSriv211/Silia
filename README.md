@@ -45,7 +45,7 @@ For demonstration I used 5 different datasets. _webtext-super-tiny_, _email-data
 - **Webtext Super Tiny** is a light-weight English-only dataset containing texts from **Wikipedia**, **fandoms**, **storylines**, **story dialogues** of various games, **transcripts of various YouTube videos**, **research papers**, **academic articles** and **blogs** (topic mainly revolving around AI and LLMs in general) and code from some of my **personal code bases** and other **publicly available repositories**. The code included in the dataset contains mostly **Python**, **C#**, **C++** and **JavaScript**. The dataset contains ~$10M$ tokens in total.
 - **Email-dataset-20k** contains 20k samples of synthetically generated business emails using **Gemma 3-4B-it** (via mlx-community/gemma-3-4b-it-4bit-DWQ). The dataset contains ~$5.5M$ tokens in total.
 - **ChatAlpaca-20k** is a chat dataset that aims to help researchers develop models for instruction-following in multi-turn conversations. The dataset is an extension of the Stanford Alpaca data, which contains multi-turn instructions and their corresponding responses. This dataset uses ChatGPT (`GPT-3.5-turbo`) to generate follow-up utterances and continue the conversation with ChatGPT. This process results in multi-turn conversations where the simulated user provides instructions and ChatGPT responds accordingly.
-- **synth-100M** is a is a sampled subset of PleIAs/SYNTH containing approximately **109,149,965 tokens**. This dataset includes diverse synthetic tasks like **Memorization** (Question-answering with Wikipedia context), **MCQ** (Multiple choice questions), **Creative Writing** (Poetry, stories, creative prompts), **Math Exercise** (Word problems with step-by-step solutions), **RAG** (Retrieval-augmented generation tasks), **Constrained Writing** (Writing with specific constraints), **Editing** (Text editing and improvement tasks). This dataset contains approximately 80% English with multilingual content in Spanish, German, French, Polish, Italian, Dutch, Latin and more.
+- **Synth-100M** is a is a sampled subset of PleIAs/SYNTH containing approximately **109,149,965 tokens**. This dataset includes diverse synthetic tasks like **Memorization** (Question-answering with Wikipedia context), **MCQ** (Multiple choice questions), **Creative Writing** (Poetry, stories, creative prompts), **Math Exercise** (Word problems with step-by-step solutions), **RAG** (Retrieval-augmented generation tasks), **Constrained Writing** (Writing with specific constraints), **Editing** (Text editing and improvement tasks). This dataset contains approximately 80% English with multilingual content in Spanish, German, French, Polish, Italian, Dutch, Latin and more.
 - **Fineweb-edu-100M** is sampled from HuggingFaceFW/fineweb-edu containing curated educational web resources. This dataset was created using **reservoir sampling**, a statistically unbiased random sampling algorithm that guarantees each sample from the source dataset has an equal probability of being included. This ensures the 100M token sample is representative of the full dataset's characteristics.
 
 ### 3.2. Training Hardware
@@ -74,41 +74,117 @@ Here, $X$ is the hidden state of our input from previous layer. $W_1$ & $W_2$ ar
 
 $X$ usually has a shape _(B, T, C)_. $W_1$ & $W_2$ has a shape _(C, 4*C)_ each and $W_3$ has a shape _(4*C, C)_. Where `B` is batch size, `T` is sequence length and `C` is the embedding dimension.
 
-#### 4.2.2. Attention
-Attention is the heart of Transformer and it needs no introduction, so before diving into Silia's mathematics let's get attention's done first.
+#### 4.2.2. Self-Attention
+Attention is the heart of Transformer and it needs no introduction.
 
 $$Q = XW_Q, K=XW_K, V=XW_V$$
 
-$$\mathrm{MHA}(Q,K,V,M) = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
+$$A = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
 
-$$\text{Attention}(X) = \text{MHA}(Q, K, V, M)W_O$$
+$$\text{Y} = \text{A}W_O$$
 
 The above equation is what was introduced in the now famous _Attention Is All You Need_ paper. This is the equation which is used for autoregressive language modelling where  $W_Q$ is the query matrix, $W_K$ is key matrix, $W_V$ is value matrix, $W_O$ is output projection matrix, $M$ is a causal attention mask and $d_k$ is dimension of the key vectors.
 
+#### 4.2.3. Gated Attention
+Gated attention was introduced by Qwen Team in their paper _Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free_ where they showed the simple modification-applying a head-specific sigmoid gate after the Scaled Dot-Product Attention (SDPA) consistently improved performance. The modification also enhanced training stability, tolerated larger learning rates and improved scaling properties. Notably, it was also found that this sparse gating mechanism mitigates the `attention sink` and enhances long-context extrapolation performance.
+
+$$Q = XW_Q, K=XW_K, V=XW_V, G=XW_G$$
+
+$$A = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
+
+$$O = \text{A} \odot \sigma(G)$$
+
+$$Y = OW_O$$
+
+Here, $\sigma$ is the sigmoid activation function, $G$ is a linear transformation over our hidden state $X$ which is passed into our sigmoid activation function. 
+
+#### 4.2.4. Exclusive Self Attention (XSA)
+_Exclusive Self Attention_ introduced by Shuangfei Zhai was widely adopted in many leading solutions in OpenAI's parameter golf challenge. It is a simple modification of self attention that constrains attention to capture only information orthogonal to the token's own value vector (thus excluding information of self position), encouraging better context modeling, improving Transformer's sequence modeling performance.
+
+Let's see what it looks like in code.
+
+```python
+# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+
+# XSA mode
+# https://arxiv.org/pdf/2603.09078
+vn = torch.nn.functional.normalize(v, dim=-1)
+z = y - (y * vn).sum(dim=-1, keepdim=True) * vn
+
+# re-assemble all head outputs side by side
+out = z.transpose(1, 2).contiguous().view(B, T, -1)
+
+# output projection
+return self.out(out)
+```
+
+#### 4.2.5. Exclusive Gated Attention (XGA)
+Combining both Gated Attention and Exclusive Self Attention we get Exclusive Gated Attention.
+
+$$Q = XW_Q, K=XW_K, V=XW_V, G=XW_G$$
+
+$$A = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
+
+$$O = \text{A} \odot \sigma(G)$$
+
+$$Y = \text{XSA}(O)$$
+
+_Exclusive Gated Attention_ brings the best of both worlds.
+
+Let's see what _XGA_ looks like in code (including RoPE and QK-Norm).
+
+```python
+	def forward(self, x, cos_sin):
+		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+
+		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
+		q, k, v, g = self.qkv(x).view(B, T, self.n_head, -1).chunk(4, dim=-1)
+
+		# apply rotary embeddings to queries and keys to get relative positional encoding
+		cos, sin = cos_sin
+		q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
+		q, k = norm(q), norm(k) # QK norm
+
+		# make head be batch dim, i.e. (B, T, nh, hs) -> (B, nh, T, hs)
+		q, k, v, g = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), g.transpose(1, 2)
+
+		# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+		y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+
+		# apply gated attention
+		# https://arxiv.org/pdf/2505.06708
+		y = y * F.sigmoid(g)
+
+		# XSA mode
+		# https://arxiv.org/pdf/2603.09078
+		vn = torch.nn.functional.normalize(v, dim=-1)
+		y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
+
+		# re-assemble all head outputs side by side
+		return y.transpose(1, 2).contiguous().view(B, T, -1)
+```
+
 #### 4.2.3. Silia
-Now as we've been through both SwiGLU and Attention, let's get into the mathematics of **Silia**.
+Now as we've been through both SwiGLU and Attention, let's get into the mathematics of **Silia**. We will use our new __Exclusive Gated Attention__ mechanism. We will refer to it as $XGA$ in our mathematical formulation which will take our hidden state $X$ as an input.
 
-We first calculate attention over the hidden state $X$.
+Now, first we'll calculate attention over the hidden state $X$.
 
-$$Q = XW_{Q_1}, K=XW_{K_1}, V_1=XW_{V_1}, V_2 = XW_{V_2}$$
+$$O = \text{XGA}(\text{RMSNorm}(X))$$
 
-$$\mathrm{AttentionScores}(Q,K,V,M) = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)$$
+$$U = OW_U, V = OW_V \tag{1}$$
 
-$$U = AttentionScores(Q, K, V, M)V_1$$
+Now on the 2 outputs $U$ and $V$, we will apply the $\text{SiLU}$ activation function.
 
-$$V = AttentionScores(Q, K, V, M)V_2$$
+$$H = U \odot \text{SiLU}(V) \tag{2}$$
 
-$$H = \text{SiLU}(U) \odot V \tag{1}$$
+Now in equation $(2)$ we have a non-linear transformation of our hidden state $X$ processed with $XGA$. Now we will pass equation $(2)$ into $XGA$.
 
-Now in equation $(1)$ we have applied the $SiLU$ activation function on the linear transformation of our hidden state $X$ via attention mechanism. Now we will calculate attention over this new hidden state $H$.
+$$Y = X + \mathrm{XGA}(H)W_O$$
 
-$$Q = HW_{Q_2}, K=HW_{K_2}, V=HW_{V_3}$$
+After passing equation $(2)$ into $XGA$ we take a dot-product of it with an output projection matrix $W_O$ and add our original hidden state $X$ for create a residual connection to ensure rich gradients in deep neural networks similar to Transformer.
 
-$$\mathrm{MHA}(Q,K,V,M) = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
-
-$$O = \text{MHA}(Q, K, V, M)W_O$$
-
-And here we go. We have our new **Silia** feed-forward network.
+And here we go, we have our new **Silia** feedforward network!
 
 ### 4.3. Parameter Analysis
 Now at first glance it looks like we are increasing parameters per layer rather than decreasing but it's actually quite opposite. Let me clarify (I will be excluding all biases for easier calculations).

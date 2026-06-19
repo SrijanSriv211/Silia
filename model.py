@@ -21,7 +21,7 @@ def apply_rotary_emb(x, cos, sin):
 	y2 = x1 * (-sin) + x2 * cos
 	return torch.cat([y1, y2], 3)
 
-class CausalSelfAttention(nn.Module):
+class ExclusiveGatedAttention(nn.Module):
 	def __init__(self, config: Config, d_hidden, chunk=1):
 		super().__init__()
 		self.n_head = config.n_head
@@ -36,7 +36,7 @@ class CausalSelfAttention(nn.Module):
 		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
 		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		q, k, v, g  = self.qkv(x).view(B, T, self.n_head, -1).chunk(4, dim=-1)
+		q, k, v, g = self.qkv(x).view(B, T, self.n_head, -1).chunk(4, dim=-1)
 
 		# apply rotary embeddings to queries and keys to get relative positional encoding
 		cos, sin = cos_sin
@@ -71,8 +71,8 @@ class Block(nn.Module):
 		d_model = config.n_embd * config.n_head
 		d_hidden = int(d_model * 4 / 3)
 
-		self.attn1 = CausalSelfAttention(config, (d_model, d_hidden), 2)
-		self.attn2 = CausalSelfAttention(config, (d_hidden, d_model))
+		self.attn1 = ExclusiveGatedAttention(config, (d_model, d_hidden), 2)
+		self.attn2 = ExclusiveGatedAttention(config, (d_hidden, d_model))
 
 	def forward(self, x, cos_sin):
 		u, v = self.attn1(norm(x), cos_sin).chunk(2, dim=-1)
