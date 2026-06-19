@@ -60,7 +60,7 @@ Tesla M60 and H100 were made available thanks to the paper sponsor Tomi Yang.
 
 ## 4. Silia (Silu In Attention)
 ### 4.1. Model Architecture
-<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:50%;">
+<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:100%;">
 
 ### 4.2. Mathematical Formulation
 #### 4.2.1. SwiGLU
