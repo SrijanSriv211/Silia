@@ -60,7 +60,7 @@ Tesla M60 and H100 were made available thanks to the paper sponsor Tomi Yang.
 
 ## 4. Silia (Silu In Attention)
 ### 4.1. Model Architecture
-<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:100%;">
+<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:90%;">
 
 ### 4.2. Mathematical Formulation
 #### 4.2.1. SwiGLU
@@ -164,7 +164,7 @@ y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
 return y.transpose(1, 2).contiguous().view(B, T, -1)
 ```
 
-#### 4.2.3. Silia
+#### 4.2.6. Silia
 Now as we've been through both SwiGLU and Attention, let's get into the mathematics of **Silia**. We will use our new __Exclusive Gated Attention__ mechanism. We will refer to it as $XGA$ in our mathematical formulation which will take our hidden state $X$ as an input.
 
 Now, first we'll calculate attention over the hidden state $X$.
@@ -257,34 +257,37 @@ So with Silia we saved 97% parameters from the Transformer.
 Please note that in Silia embedding dimension (`C`) and head dimension (`D`) are exactly the same thing.
 
 ### 4.4. The Intuition
-So how I ended up with this idea? Why do I think replacing linear layers in SwiGLU with Attention layers was a good idea?
+Why do I think replacing linear layers in SwiGLU Feedforward Network with Attention is a good idea?
 
-The reason is that we already know that Attention is mostly a linear transformation over our hidden state, but the catch is that it's a "smarter" linear transformation.
+Attention as we know is mostly a linear transformation over our hidden state but it isn't simple, regular transformation like Feedforward network. We can think of attention as "smart" linear transformation. Such a linear transformation which tells us relevancy of every token, especially at longer sequence lengths. However the attention mechanism lacks a "strong" non-linearity. Attention does use the _softmax_ activation function which is a non-linear activation function but _softmax_ only decides which token attend to which other tokens. This makes _softmax_ a not so "strong" activation function.
 
-We can observe in standard Transformer, attention layer modifies the hidden state then FFN processes that "smartly" modified hidden state. However an attention-only Transformer perform incredibly poorly (not as bad a linear-layer-only-no-non-linearity neural network) due to the lack of a "strong" activation function. Attention only has `softmax` as it's activation function but `softmax` only decides which tokens should attend to which other tokens. This makes `softmax` a not so "strong" activation function.
+SwiGLU feedforward network however does have a strong activation function which is the _silu_ activation, in-fact at small scales (less parameters and smaller context windows) feedforward networks such as SwiGLU can approximate exactly what attention does with high accuracy, and this does make sense after all feedforward networks are _universal function approximators_. However as the model parameters and the context length scales feedforward networks get worse at approximating the attention mechanism which results in worse performance compared to Transformer.
 
-Attention is dynamic and smart about which information to mix, but it has no strong non-linearity to actually transform that information. SwiGLU has the strong non-linearity but it's static. Same weights for every input.
+So basically attention is dynamic and smart about which information to mix, but it has no strong non-linearity to actually transform that information. SwiGLU has the strong non-linearity but it's static. Same weights for every input and it doesn't scale well.
 
-As per my observation SwiGLU at small scales (less parameters and specially context windows) can approximate what attention does (token mixing and information routing). However it fails at longer contexts because it has no positional awareness or dynamic weighting.
-
-So instead of running both separately and wasting parameters on overlapping functionality, Silia replaces the static linear matrices in SwiGLU with attention getting dynamic mixing and strong non-linearity in one unified operation.
+This is what **Silia** is about. Introducing a new class of feedforward networks which use attention mechanism for transforming our input and hidden states linearly and using activation functions like _silu_ for transforming that information non-linearly. Instead of running both separately and wasting parameters on overlapping functionality, Silia replaces the static linear matrices in SwiGLU with attention getting dynamic mixing and strong non-linearity in one unified operation.
 
 ### 4.5. The Cost
-Merging Attention and SwiGLU together into a single operation unit does make the model more parameter efficient however it comes at a cost. The cost of memory and compute.
+Merging Attention and SwiGLU together into a single operation unit does make the model parameter efficient however it comes at some cost.
 
-One open reviewer pointed out that the attention computational cost might increase by 2.5x and the attention memory cost by 2x.
+One open reviewer pointed out in standard Transformer since both Attention and FFN are separate, they both have residual connections which improves training with richer gradients for deep neural networks but Silia has only one residual connection per layer. This means that deep Silia networks might underperform deep Transformer networks.
 
-This is backed by a simple calculation. If we let batch size = 8, number of heads as 16 and context window = 1024.
+Another open reviewer pointed out that the attention computational cost might increase by 2.5x and the attention memory cost by 2x.
 
-In a Transformer model, per block we have only 1 attention layer:
+This is backed by a very simple calculation.
 
-$(8*16*1024*1024) * 4 = 536870912$ _bytes_ ~ $0.53$ _GBs_
+Let:
+- batch size = 8
+- number of heads = 16
+- context window = 1024
 
-In Silia, per block we have 2 attention layers:
-$(8*16*1024*1024*2) * 4 = 1073741824$ _bytes_ ~ $1.07$ _GBs_
+| Per layer                | Transformer               | Silia                             |
+| ------------------------ | ------------------------- | --------------------------------- |
+| Number of elements       | $8 \cdot 16 \cdot 1024^2$ | $8 \cdot 16 \cdot 1024^2 \cdot 2$ |
+| VRAM usage (FP32, Bytes) | $536870912$               | $1073741824$                      |
+| VRAM usage (FP32, GB)    | ~$0.53$                   | ~$1.07$                           |
 
-We can use Sliding Window Attention or DeepSeek's Compression Sparse Attention which would dramatically reduce compute and memory usage while preserving much of the original performance allowing for scaling context window and the model as usual.
-
+To mitigate this issue we can use Sliding Window Attention or DeepSeek's Compressed Sparse Attention mechanism which would dramatically reduce compute and memory usage while preserving much of the original performance allowing for scaling model parameters and context window as usual.
 
 ## 5. Experiments
 The idea and intuition is quite simple but it works surprisingly well at tiny scale (≤ 5M parameters) and is able to achieve comparable loss and generation quality to Andrej Karpathy's GPT-2 architecture based nanoGPT model.
@@ -409,19 +412,15 @@ AI-powered speech recognition technology that indicate sound quality and meaning
 
 ## 6. Conclusion
 ### 6.1. Use Cases
-1. It can be used as super-light-weight, attention-powered, on-device models in Smart Watches, old Mobile Phones and several generations old computers for very task-specific generations and classification.
-2. It can be used as on-device models to immediately generate dialogues for NPCs in video games increasing immersion.
-3. It can be used for simple & fast image/text/topic classification, sentiment/emotion analysis, intent/toxicity detection and more.
+1. It can be used as super-light-weight, attention-powered, on-device models in Smart Watches, old Mobile Phones and several generations old computers as very task-specific models.
+2. It can be used as on-device models to immediately generate one-linear captions/titles, dialogues for NPCs in video games for increased immersion and more.
+3. It can be also be used for simple & fast image/text/topic classification, sentiment/emotion analysis, intent/toxicity detection and more.
 
 ### 6.2. Limitations
-I was unable to test this architecture beyond 5M parameters due to my hardware limitations. This is something which I want to focus on getting done next. I did try using Google Collab but since I do not have a subscription I wasn't able to scale the number of parameters a lot. Though using Google Collab meant that the training finished within a few minutes rather than hours on my PC.
-
-I believe that at larger scales (beyond 50M parameters) Silia will break due to it's extremist focus on parameter efficiency. By "break" I mean that since Silia is using Attention in place of linear transformation matrices we cannot increase the embedding/head dimension beyond 512 or increase the number of heads a lot as there are already certain observations made that Attention with 32 heads and 64 head dimension performs way better than with 4 heads and 512 head dimension.
-
-The only practical way to scale Silia is by adding more layers rather than increasing head dimension or number of heads, since Silia is already constrained in both. This means at larger scales Silia would require significantly more layers than an equivalent Transformer, making it slower to train and run.
+Silia trains successfully at 100M parameters but whether it'll break at scales beyond 100M parameters is still a thing to be tested.
 
 ### 6.3. Closing Thoughts
-Silia is a small idea for a small scale. The sub-10M parameter space is underexplored and for good reason, there isn't much glory in it. But I think there's some genuine value in asking whether the standard Transformer block is the right design when you only have a few hundred thousand parameters to spare. Merging attention and SwiGLU into a single unified operation isn't a revolutionary idea, but the parameter savings are real and the results are encouraging enough to be worth sharing. I hope this paper is useful to someone working in the same constrained corner of the field that I am.
+Silia is a small idea for small scale. The sub-10M parameter space is underexplored and for good reasons, there isn't much glory in it. But I think there's some genuine value in asking whether the standard Transformer block is the right design when you only have a few hundred thousand parameters to spare. Merging attention and SwiGLU into a single unified operation isn't a revolutionary idea, but the parameter savings are real and the results are encouraging enough to be worth sharing. I hope this paper is useful to someone working in the same constrained corner of the field that I am.
 
 
 ## Acknowledgements
