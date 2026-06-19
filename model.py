@@ -14,7 +14,7 @@ def norm(x):
 	return F.rms_norm(x, (x.size(-1),))
 
 def apply_rotary_emb(x, cos, sin):
-	assert x.ndim == 4  # multihead attention
+	assert x.ndim == 4 # multihead attention
 	d = x.shape[3] // 2
 	x1, x2 = x[..., :d], x[..., d:] # split up last time into two halves
 	y1 = x1 * cos + x2 * sin # rotate pairs of dims
@@ -49,15 +49,17 @@ class CausalSelfAttention(nn.Module):
 		# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
 		y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
 
+		# apply gated attention
+		# https://arxiv.org/pdf/2505.06708
+		y = y * F.sigmoid(g)
+
 		# XSA mode
 		# https://arxiv.org/pdf/2603.09078
 		vn = torch.nn.functional.normalize(v, dim=-1)
 		y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
 
-		# apply gated attention
-		# https://arxiv.org/pdf/2505.06708
-		y = y * F.sigmoid(g)
-		y = y.transpose(1, 2).contiguous().view(B, T, -1) # re-assemble all head outputs side by side
+		# re-assemble all head outputs side by side
+		y = y.transpose(1, 2).contiguous().view(B, T, -1)
 
 		# output projection
 		return self.out(y)
