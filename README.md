@@ -185,78 +185,7 @@ After passing equation $(2)$ into $XGA$ we take a dot-product of it with an outp
 
 And here we go, we have our new **Silia** feedforward network!
 
-### 4.3. Parameter Analysis
-Now at first glance it looks like we are increasing parameters per layer rather than decreasing but it's actually quite opposite. Let me clarify (I will be excluding all biases for easier calculations).
-
-#### 4.3.1. Parameters Per Layer In Transformer
-In a traditional Transformer the Attention layer has $W_Q$, $W_K$, $W_V$ and $W_O$ matrices, and SwiGLU has $W_1$, $W_2$ and $W_O$ matrices. For the sake of simplicity let's ignore the $W$ and call it all QKV (Query, Key, Value) in attention and GC (Gate, Content) in SwiGLU.
-
-1. Matrix QKV is shaped `(C, 3*N*D)` where $Q$, $K$, $V$ each `(C, N*D)`.
-2. Matrix $O$ in Attention is shaped `(N*D, C)`.
-3. Matrix GC is shaped `(C, 2*4*C)` where $G$, $C$ each `(C, 4*C)`.
-4. Matrix $O$ in SwiGLU is shaped `(4*C, C)`.
-
-Here `C` is embedding dimension, `D` is head dimension (typically 64 or 128), `N` is number of heads, `4*C` in SwiGLU is expansion. Head dimension (`D`) is typically `C/N`.
-
-Now add all Attention layer shapes
-
-$$C*(3 \cdot N \cdot D) + (N \cdot D) \cdot C = 4 \cdot C^2 \tag{1}$$
-
-Now add all SwiGLU layer shapes
-
-$$C \cdot (2 \cdot 4 \cdot C) + (4 \cdot C) \cdot C = 3 \cdot 4 \cdot C^2 \tag{2}$$
-
-Now add equation $(1)$ and $(2)$ together
-
-$$4 \cdot C^2 + 3 \cdot 4 \cdot C^2 = (4 \cdot C)^2$$
-
-So we have a total of $(4 \cdot C)^2$ parameters per layer in a traditional Transformer.
-
-#### 4.3.2. Parameters Per Layer In Silia
-Unlike Transformer in Silia we merge both Attention and SwiGLU FFN together as discussed above. In Silia we have $W_{Q_1}$, $W_{Q_2}$, $W_{K_1}$, $W_{K_2}$, $W_{V_1}$, $W_{V_2}$, $W_{V_3}$, $W_O$ layers. Again for the sake of simplicity, let's call them QK, V and O.
-
-1. Matrix QK is shaped `(D, 4*N*D)` where $W_{Q_1}$, $W_{Q_2}$, $W_{K_1}$ and $W_{K_2}$ each is shaped `(D, N*D)`.
-2. Matrix V is shaped `(D, 3*N*D)` where $W_{V_1}$, $W_{V_2}$ and $W_{V_3}$ each is shaped `(D, N*D)`.
-3. Matrix O is shaped `(N*D, D)` -> `(N*D, D)`.
-
-Here `D` is head dimension (set to 64 or 128), `N` is number of heads.
-
-Now add all shapes together
-
-$$D \cdot (4 \cdot N \cdot D) + D \cdot (3 \cdot N \cdot D) + (N \cdot D) \cdot D = 8 \cdot N \cdot D^2$$
-
-So in Silia we have $8 \cdot N \cdot D^2$ parameters per layer. Comparing number of parameters in Transformer with Silia we get $8*N*D^2 < (4*C)^2$
-
-#### 4.3.3. What Just Happened?
-Now I know what you might be thinking. _Why did he take embedding dimension same as head dimension in his architecture? Obviously this will reduce the number of parameters. Is he stupid? Did I just wasted my time reading some AI slop?_
-
-No. Let me explain.
-
-Since all our linear computation is now happening within the attention mechanism, we don't need traditional expansion bottlenecks anymore. This means that keeping the embedding dimension similar to head dimension of traditional Transformer (between 64-512) is more than enough for our model actually. Expansion does happen but instead of expanding on embedding dimension, we expand on the number of heads.
-
-Especially considering we are designing Silia to work with tiny scale this approach makes more sense and also helps us save quite a lot of parameters. Let's compare Silia with traditional Transformer.
-
-| Hyperparameters      | Transformer       | Silia          |
-| -------------------- | ----------------- | -------------- |
-| embd dim (`C`)       | 256               | 64             |
-| heads dim (`D`)      | 64                | 64             |
-| num heads (`N`)      | 4                 | 4              |
-| num params per layer | 1,048,576 (1.04M) | 131072 (0.13M) |
-
-So with Silia we saved 87.5% parameters from the Transformer.
-
-| Hyperparameters      | Transformer         | Silia           |
-| -------------------- | ------------------- | --------------- |
-| embd dim (`C`)       | 1024                | 64              |
-| heads dim (`D`)      | 64                  | 64              |
-| num heads (`N`)      | 16                  | 16              |
-| num params per layer | 16,777,216 (16.77M) | 524,288 (0.52M) |
-
-So with Silia we saved 97% parameters from the Transformer.
-
-Please note that in Silia embedding dimension (`C`) and head dimension (`D`) are exactly the same thing.
-
-### 4.4. The Intuition
+### 4.3. The Intuition
 Why do I think replacing linear layers in SwiGLU Feedforward Network with Attention is a good idea?
 
 Attention as we know is mostly a linear transformation over our hidden state but it isn't simple, regular transformation like Feedforward network. We can think of attention as "smart" linear transformation. Such a linear transformation which tells us relevancy of every token, especially at longer sequence lengths. However the attention mechanism lacks a "strong" non-linearity. Attention does use the _softmax_ activation function which is a non-linear activation function but _softmax_ only decides which token attend to which other tokens. This makes _softmax_ a not so "strong" activation function.
@@ -267,7 +196,7 @@ So basically attention is dynamic and smart about which information to mix, but 
 
 This is what **Silia** is about. Introducing a new class of feedforward networks which use attention mechanism for transforming our input and hidden states linearly and using activation functions like _silu_ for transforming that information non-linearly. Instead of running both separately and wasting parameters on overlapping functionality, Silia replaces the static linear matrices in SwiGLU with attention getting dynamic mixing and strong non-linearity in one unified operation.
 
-### 4.5. The Cost
+### 4.4. The Cost
 Merging Attention and SwiGLU together into a single operation unit does make the model parameter efficient however it comes at some cost.
 
 One open reviewer pointed out in standard Transformer since both Attention and FFN are separate, they both have residual connections which improves training with richer gradients for deep neural networks but Silia has only one residual connection per layer. This means that deep Silia networks might underperform deep Transformer networks.
