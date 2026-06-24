@@ -214,7 +214,7 @@ Let:
 | ------------------------ | ------------------------- | --------------------------------- |
 | Number of elements       | $8 \cdot 16 \cdot 1024^2$ | $8 \cdot 16 \cdot 1024^2 \cdot 2$ |
 | VRAM usage (FP32, Bytes) | $536870912$               | $1073741824$                      |
-| VRAM usage (FP32, GB)    | ~$0.53$                   | ~$1.07$                           |
+| VRAM usage (FP32, GB)    | ~ $0.53$                  | ~ $1.07$                          |
 
 To mitigate this issue we can use Sliding Window Attention or DeepSeek's Compressed Sparse Attention mechanism which would dramatically reduce compute and memory usage while preserving much of the original performance allowing for scaling model parameters and context window as usual.
 
