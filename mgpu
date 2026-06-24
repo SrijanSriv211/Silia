@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
-if [ $# -lt 2 ]; then
-	echo "Usage: mgpu <config_name> <silia|gpt> [dist]"
+if [ $# -lt 3 ]; then
+	echo "Usage: mgpu <config_name> <silia|gpt> <cuda|cpu> [dist]"
 	exit 1
 fi
 
 CONFIG="$1"
 ARCH="$2"
+CUDA="$3"
 CONFIG_FILE="config/${CONFIG}.json"
 
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -14,8 +15,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
 	exit 1
 fi
 
-if [ "$3" = "dist" ]; then
-	torchrun --standalone --nproc-per-node=2 train.py "$CONFIG_FILE" "$ARCH"
+if [ "$4" = "dist" ]; then
+	torchrun --standalone --nproc-per-node=2 train.py "$CONFIG_FILE" "$ARCH" "$CUDA"
 else
-	python3 train.py "$CONFIG_FILE" "$ARCH"
+	python3 train.py "$CONFIG_FILE" "$ARCH" "$CUDA"
 fi

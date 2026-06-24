@@ -124,7 +124,7 @@ torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 
 # set device
-device_type = "cuda" if torch.cuda.is_available() else "cpu"
+device_type = "cuda" if torch.cuda.is_available() and sys.argv[3] == "cuda" else "cpu"
 init_from = CONFIG["init_from"][11:].strip("/") if CONFIG["init_from"].startswith("pretrained,") else "scratch"
 init_seed_offset = random.randint(1, 2000) if CONFIG["init_from"].startswith("pretrained,") else 0
 
