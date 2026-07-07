@@ -1,11 +1,10 @@
 # Tiny Scale Is All I Can Spare To Play With Transformer.
-Srijan Srivastava
-
-India
-
-Srivastavavsrijan321@gmail.com
-
+<p align="center">
+Srijan Srivastava<br>
+India<br>
+Srivastavavsrijan321@gmail.com<br>
 QCoreNest@gmail.com
+</p>
 
 v2, June 2026
 
@@ -61,6 +60,22 @@ Tesla M60 and H100 were made available thanks to the paper sponsor Tomi Yang.
 ## 4. Silia (Silu In Attention)
 ### 4.1. Model Architecture
 <img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:90%;">
+
+Merging of Attention and SwiGLU was inspired from 2 core ideas.
+
+Attention is dynamic and smart about which information to mix, but it has no strong non-linearity to actually transform that information. SwiGLU has the strong non-linearity but it cannot transform input in a way that Attention does.
+
+In Google's PaLM technical report _PaLM: Scaling Language Modeling with Pathways_
+
+instead of doing
+
+$$y = x + MLP(RMSNorm(x + Attention(RMSNorm(x)))$$
+
+the authors did
+
+$$y = x + MLP(RMSNorm(x)) + Attention(RMSNorm(x))$$
+
+and noted 15% faster training speed with small to zero degradation in quality.
 
 ### 4.2. Mathematical Formulation
 #### 4.2.1. SwiGLU
@@ -192,14 +207,12 @@ Attention as we know is mostly a linear transformation over our hidden state but
 
 SwiGLU feedforward network however does have a strong activation function which is the _silu_ activation, in-fact at small scales (less parameters and smaller context windows) feedforward networks such as SwiGLU can approximate exactly what attention does with high accuracy, and this does make sense after all feedforward networks are _universal function approximators_. However as the model parameters and the context length scales feedforward networks get worse at approximating the attention mechanism which results in worse performance compared to Transformer.
 
-So basically attention is dynamic and smart about which information to mix, but it has no strong non-linearity to actually transform that information. SwiGLU has the strong non-linearity but it's static. Same weights for every input and it doesn't scale well.
-
 This is what **Silia** is about. Introducing a new class of feedforward networks which use attention mechanism for transforming our input and hidden states linearly and using activation functions like _silu_ for transforming that information non-linearly. Instead of running both separately and wasting parameters on overlapping functionality, Silia replaces the static linear matrices in SwiGLU with attention getting dynamic mixing and strong non-linearity in one unified operation.
 
 ### 4.4. The Cost
 Merging Attention and SwiGLU together into a single operation unit does make the model parameter efficient however it comes at some cost.
 
-One open reviewer pointed out in standard Transformer since both Attention and FFN are separate, they both have residual connections which improves training with richer gradients for deep neural networks but Silia has only one residual connection per layer. This means that deep Silia networks might underperform deep Transformer networks.
+One open reviewer pointed out that in standard Transformer since both Attention and FFN are separate, they both have residual connections which improves training with richer gradients for deep neural networks but Silia has only one residual connection per layer. This means that deep Silia networks might underperform compared to deep Transformer networks.
 
 Another open reviewer pointed out that the attention computational cost might increase by 2.5x and the attention memory cost by 2x.
 
@@ -218,38 +231,33 @@ Let:
 
 To mitigate this issue we can use Sliding Window Attention or DeepSeek's Compressed Sparse Attention mechanism which would dramatically reduce compute and memory usage while preserving much of the original performance allowing for scaling model parameters and context window as usual.
 
+
 ## 5. Experiments
-The idea and intuition is quite simple but it works surprisingly well at tiny scale (≤ 5M parameters) and is able to achieve comparable loss and generation quality to Andrej Karpathy's GPT-2 architecture based nanoGPT model.
+The idea and intuition is quite simple but it works surprisingly well at tiny scale (≤ 5M parameters) and is able to achieve comparable loss and generation quality to Andrej Karpathy's nanoGPT (with RoPE and SwiGLU) architecture.
 
-I custom trained a OpenAI-o200k_base-regex-pattern+BPE tokenizer on my custom [Srijan-Srivastava/super-tiny-webtext](https://huggingface.co/datasets/Srijan-Srivastava/webtext-super-tiny) dataset with a vocabulary size of 8192 tokens. This exact same tokenizer was used for all the following experiments.
+I trained 3 different regex+BPE tokenizer based on OpenAI-o200k_base regex pattern.
 
-Hyperparameters for Silia:
-1. Block size = 256 (with rotary embedding can scale up to 2k)
-2. Number of layers = 2
-3. Number of heads = 4
-4. Embedding size = 64
-5. Batch size = 16
-6. Max iterations = 10,000
-7. Max learning rate = 3e-3
-8. Min learning rate = 3e-4
+| Dataset            | Vocabulary size | Tokenizer name |
+| ------------------ | --------------- | -------------- |
+| Super Tiny WebText | 8192            | cl8k           |
+| Fineweb-edu-100M   | 12288           | o12k           |
+| Synth-100M         | 16384           | cl16k          |
 
-The model had 0.786432M total parameters, out of which 0.262144M were non-embedding parameters.
+The first 3 experiments were done with the exact same following settings:
 
-Hyperparameters for nanoGPT (GPT-2 with RoPE & SwiGLU):
-1. Block size = 256 (with rotary embedding can scale up to 2k)
-2. Number of layers = 2
-3. Number of heads = 4
-4. Head dimension = 64
-5. Embedding size = 256
-6. Batch size = 16
-7. Max iterations = 10,000
-8. Max learning rate = 3e-3
-9. Min learning rate = 3e-4
-
-The model had 4.19M total parameters, out of which 2.09M were non-embedding parameters.
-
-> [!NOTE]
-> I'll be only attaching the generated sample outputs from Silia and not from nanoGPT because the outputs are very similar.
+| Hyperparameters                        | Silia | nanoGPT |
+| -------------------------------------- | ----- | ------- |
+| Context length                         | 256   | 256     |
+| Number of layers                       | 2     | 2       |
+| Number of heads                        | 4     | 4       |
+| Head dimension                         | N/A   | 64      |
+| Embedding size                         | 64    | 256     |
+| Batch size                             | 16    | 16      |
+| Max iterations                         | 10k   | 10k     |
+| Max learning rate                      | 3e-3  | 3e-3    |
+| Min learning rate                      | 3e-4  | 3e-4    |
+| Total parameters (in millions)         | 0.78  | 4.19    |
+| Non-embedding parameters (in millions) | 0.26  | 2.09    |
 
 ### 5.1. Business Email Generation
 Inspired from [Experiment: How far can a 28M model go in business email generation?](https://www.reddit.com/r/LocalLLaMA/comments/1ryq2lg/experiment_how_far_can_a_28m_model_go_in_business/) I trained a business email generation model on [Kamisori-daijin/email-datasets-20k](https://huggingface.co/datasets/Kamisori-daijin/email-datasets-20k) on Hugging Face. There are 20,000 samples of emails and was created using **Gemma 3-4B-it** (via mlx-community/gemma-3-4b-it-4bit-DWQ).
@@ -341,7 +349,7 @@ AI-powered speech recognition technology that indicate sound quality and meaning
 
 ## 6. Conclusion
 ### 6.1. Use Cases
-1. It can be used as super-light-weight, attention-powered, on-device models in Smart Watches, old Mobile Phones and several generations old computers as very task-specific models.
+1. It can be used as super-light-weight, attention-powered, on-device task-specific models for Smart Watches, old Mobile Phones and several generations old computers.
 2. It can be used as on-device models to immediately generate one-linear captions/titles, dialogues for NPCs in video games for increased immersion and more.
 3. It can be also be used for simple & fast image/text/topic classification, sentiment/emotion analysis, intent/toxicity detection and more.
 
@@ -393,6 +401,8 @@ codelion, (2025). Fineweb-edu-100M. https://huggingface.co/datasets/codelion/fin
 
 HuggingFaceFW, (2025). FineWeb-Edu. https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu.
 
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam Roberts, Paul Barham, Hyung Won Chung, Charles Sutton, Sebastian Gehrmann, Parker Schuh, Kensen Shi, Sasha Tsvyashchenko, Joshua Maynez, Abhishek Rao, Parker Barnes, Yi Tay, Noam Shazeer, Vinodkumar Prabhakaran, Emily Reif, Nan Du, Ben Hutchinson, Reiner Pope, James Bradbury, Jacob Austin, Michael Isard, Guy Gur-Ari, Pengcheng Yin, Toju Duke, Anselm Levskaya, Sanjay Ghemawat, Sunipa Dev, Henryk Michalewski, Xavier Garcia, Vedant Misra, Kevin Robinson, Liam Fedus, Denny Zhou, Daphne Ippolito, David Luan, Hyeontaek Lim, Barret Zoph, Alexander Spiridonov, Ryan Sepassi, David Dohan, Shivani Agrawal, Mark Omernick, Andrew M. Dai, Thanumalayan Sankaranarayana Pillai, Marie Pellat, Aitor Lewkowycz, Erica Moreira, Rewon Child, Oleksandr Polozov, Katherine Lee, Zongwei Zhou, Xuezhi Wang, Brennan Saeta, Mark Diaz, Orhan Firat, Michele Catasta, Jason Wei, Kathy Meier-Hellstern, Douglas Eck, Jeff Dean, Slav Petrov, Noah Fiedel, (2022). PaLM: Scaling Language Modeling with Pathways. _arXiv preprint arXiv:2204.02311_.
+
 Noam Shazeer, (2020). GLU variants improve transformer. _arXiv preprint arXiv:2002.05202_.
 
 Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin, (2017). Attention is all you need. _arXiv preprint arXiv:1706.03762_.
@@ -401,7 +411,7 @@ Zihan Qiu, Zekun Wang, Bo Zheng, Zeyu Huang, Kaiyue Wen, Songlin Yang, Rui Men, 
 
 Shuangfei Zhai, (2026). Exclusive Self Attention. _arXiv preprint arXiv:2603.09078_.
 
-DeepSeek-AI, (2026). DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence. https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf.
+DeepSeek-AI, (2026). DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence. _arXiv preprint arXiv:2606.19348_.
 
 
 ## Citation
