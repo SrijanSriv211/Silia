@@ -6,6 +6,14 @@ Srivastavavsrijan321@gmail.com<br>
 QCoreNest@gmail.com
 </p>
 
+<p align="center">
+	<a href="https://doi.org/10.5281/zenodo.20631957"><b>Technical Report (Zenodo)</b>📑</a>
+    <br>
+	<a href="https://github.com/SrijanSriv211/Silia/blob/593c94e765a21b32cf69f0e95a9f8e6d9396a4da/Silia%3A%20Tiny%20Scale%20Is%20All%20I%20Can%20Spare%20To%20Play%20With%20Transformer.pdf"><b>Technical Report (GitHub)</b>📑</a>
+    <br>
+	<a href="https://huggingface.co/Srijan-Srivastava/Strawberry-s1/blob/main/Silia%3A%20Tiny%20Scale%20Is%20All%20I%20Can%20Spare%20To%20Play%20With%20Transformer.pdf"><b>Technical Report (Hugging Face)</b>📑</a>
+</p>
+
 v1, June 2026
 
 
