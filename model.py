@@ -6,8 +6,9 @@ import torch.nn as nn, torch
 class Config:
 	vocab_size: int = 8192
 	block_size: int = 1024
-	n_layer: int = 2
-	n_head: int = 4
+	n_layer: int = 8
+	n_head: int = 8
+	n_rank: int = 3
 	n_embd: int = 64
 
 def norm(x):
@@ -21,22 +22,35 @@ def apply_rotary_emb(x, cos, sin):
 	y2 = x1 * (-sin) + x2 * cos
 	return torch.cat([y1, y2], 3)
 
-class ExclusiveGatedAttention(nn.Module):
-	def __init__(self, config: Config, d_hidden, chunk=1):
+# https://arxiv.org/abs/2606.20097
+# inspired from Qwen Team's HydraHead,
+# process half heads with ELA and other half with AFT
+class HydraLatentAttention(nn.Module):
+	def __init__(self, config: Config, d_hidden):
 		super().__init__()
-		self.n_head = config.n_head
+		assert config.n_head % 2 == 0
+		self.n_rank = config.n_rank
+		self.n_head = config.n_head // 2
 		self.n_embd = config.n_embd
 		d_model = self.n_embd * self.n_head
-		d_in, d_out = d_hidden
+		l_model = self.n_embd * self.n_rank
 
-		self.qkv = nn.Linear(d_in, 4*d_model, bias=False)
-		self.out = nn.Linear(d_model, d_out*chunk, bias=False)
+		self.residual = nn.Linear(d_hidden, 2*d_model, bias=False)
+		self.aft_qkv = nn.Linear(d_hidden, 3*d_model, bias=False)
+		self.qkvg_l = nn.Linear(d_hidden, 3*l_model, bias=False)
+		self.qk_u = nn.Linear(2*l_model, 2*d_model, bias=False)
+		self.out = nn.Linear(l_model, d_model, bias=False)
 
-	def forward(self, x, cos_sin):
+	# https://arxiv.org/abs/2405.04434
+	# deepseek mla implementation without decoupled rope,
+	# along with exclusive self attention & gated attention
+	def exclusive_latent_attention(self, x, cos_sin):
 		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
 		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		q, k, v, g = self.qkv(x).view(B, T, self.n_head, -1).chunk(4, dim=-1)
+		c_q, c_kv, c_g = self.qkvg_l(x).chunk(3, dim=-1)
+		q, k = self.qk_u(torch.cat([c_q, c_kv], dim=-1)).view(B, T, self.n_head, -1).chunk(2, dim=-1)
+		v, g = c_kv.view(B, T, self.n_rank, -1), c_g.view(B, T, self.n_rank, -1)
 
 		# apply rotary embeddings to queries and keys to get relative positional encoding
 		cos, sin = cos_sin
@@ -61,8 +75,48 @@ class ExclusiveGatedAttention(nn.Module):
 		# re-assemble all head outputs side by side
 		y = y.transpose(1, 2).contiguous().view(B, T, -1)
 
-		# output projection
-		return self.out(y)
+		# absorb `Wv_up` into output projection
+		return self.out(y).view(B, T, self.n_head, -1)
+
+	# https://arxiv.org/abs/2105.14103
+	# i'm using apple's attention free transformer
+	# can also use KDA or GDN linear attention, or Nemotron style Mamba as well
+	def attention_free_transformer(self, x):
+		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+
+		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
+		q, k, v = self.aft_qkv(x).chunk(3, dim=-1)
+		q, k = norm(q), norm(k) # QK norm
+
+		# exponentiate keys
+		w = torch.exp(k) # (B, T, C)
+		kv = w * v # (B, T, C)
+
+		# causal cumulative sums
+		w = torch.cumsum(w, dim=1)
+		kv = torch.cumsum(kv, dim=1)
+
+		# normalize
+		y = kv / (w + 1e-6)
+
+		# gate with query
+		y = torch.sigmoid(q) * y
+		return y.view(B, T, self.n_head, -1)
+
+	def forward(self, x, cos_sin):
+		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+
+		# rmsnorm & learned residual pathway for richer gradients
+		t = norm(x)
+		r = self.residual(x)
+
+		# first half heads to ela & next half to aft
+		ela = self.exclusive_latent_attention(t, cos_sin)
+		aft = self.attention_free_transformer(t)
+
+		# interleave heads of ela & aft
+		y = torch.stack([ela, aft], dim=3).flatten(2, 3) # (B, T, 2*nh, hs)
+		return r + y.view(B, T, -1)
 
 class Block(nn.Module):
 	def __init__(self, config: Config):
@@ -71,13 +125,19 @@ class Block(nn.Module):
 		d_model = config.n_embd * config.n_head
 		d_hidden = int(d_model * 4 / 3)
 
-		self.attn1 = ExclusiveGatedAttention(config, (d_model, d_hidden), 2)
-		self.attn2 = ExclusiveGatedAttention(config, (d_hidden, d_model))
+		self.a1 = HydraLatentAttention(config, d_model)
+		self.a2 = HydraLatentAttention(config, d_hidden)
+		self.l1 = nn.Linear(d_model, 2*d_hidden, bias=False)
+		self.l2 = nn.Linear(d_hidden, d_model, bias=False)
 
 	def forward(self, x, cos_sin):
-		u, v = self.attn1(norm(x), cos_sin).chunk(2, dim=-1)
+		y = self.a1(x, cos_sin)
+
+		u, v = self.l1(y).chunk(2, dim=-1)
 		y = u * F.silu(v)
-		return x + self.attn2(y, cos_sin)
+
+		y = self.a2(y, cos_sin)
+		return x + self.l2(y)
 
 class Silia(nn.Module):
 	def __init__(self, config: Config):
