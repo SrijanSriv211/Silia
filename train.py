@@ -395,8 +395,8 @@ for _ in range(n_steps):
 		os.makedirs(ck_save_path, exist_ok=True)
 
 		# save model, optimizer & stats
-		torch.save(get_state(raw_model, "model"), f"{ck_save_path}/model.bin")
-		torch.save(get_state(optimizers, "optimizer"), f"{ck_save_path}/optimizer.bin")
+		torch.save(get_state(raw_model, hyperparams, "model", device_type), f"{ck_save_path}/model.bin")
+		torch.save(get_state(optimizers, optimizer_hyperparams, "optimizer", device_type), f"{ck_save_path}/optimizer.bin")
 		with open(f"{ck_save_path}/stats.json", "w", encoding="utf-8") as f:
 			json.dump(stats, f, indent=4)
 
@@ -465,8 +465,8 @@ if master_process:
 	os.makedirs(ck_save_path, exist_ok=True)
 
 	# save model, optimizer & stats
-	torch.save(get_state(raw_model, "model"), f"{ck_save_path}/model.bin")
-	torch.save(get_state(optimizers, "optimizer"), f"{ck_save_path}/optimizer.bin")
+	torch.save(get_state(raw_model, hyperparams, "model", device_type), f"{ck_save_path}/model.bin")
+	torch.save(get_state(optimizers, optimizer_hyperparams, "optimizer", device_type), f"{ck_save_path}/optimizer.bin")
 	with open(f"{ck_save_path}/stats.json", "w", encoding="utf-8") as f:
 		json.dump(stats, f, indent=4)
 
