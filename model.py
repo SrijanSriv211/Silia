@@ -123,7 +123,7 @@ class Block(nn.Module):
 		self.a1 = HydraLatentAttention(config, config.n_embd)
 		self.a2 = HydraLatentAttention(config, d_hidden)
 		self.l1 = nn.Linear(d_model, 2*d_hidden, bias=False)
-		self.l2 = nn.Linear(d_model // 2, config.n_embd, bias=False)
+		self.l2 = nn.Linear(d_model, config.n_embd, bias=False)
 
 	def forward(self, x, cos_sin):
 		y = self.a1(x, cos_sin)
