@@ -14,6 +14,7 @@ from itertools import chain
 
 import random, pickle, torch, regex, json, time, math, sys
 
+#* IMPORTANT FUNCTIONS AHEAD
 def print0(*text, println=True, overwrite=False, save_to_file=True, log_path="bin"):
 	if println:
 		print(*text)
@@ -47,175 +48,6 @@ def calc_total_time(seconds):
 
 	return ", ".join(t) if t else "0 seconds"
 
-# load config
-CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.argv) > 1 else {
-	"dataset": {
-		"data_division": 0.8,
-		"load_from_file": True,
-		"path": "data/webtext.bin"
-	},
-	"checkpoints": {
-		"path": "bin/c1",
-		"interval": 2000,
-		"create_checkpoints": True
-	},
-	"model_hyperparams": {
-		"vocab_size": 16384,
-		"block_size": 1024,
-		"n_layer": 4,
-		"n_head": 16,
-		"n_embd": 128
-	},
-	"optimizer_hyperparams": {
-		"eps": 1e-10,
-		"beta1": 0.9,
-		"beta2": 0.95,
-		"weight_decay": 1e-1,
-		"use_muon": True,
-		"momentum": 0.95
-	},
-	"encoder_path": "bin/cl8k.bin",
-	"init_from": "scratch",
-	"seed": 18,
-
-	"gradient_accumulation_steps": 1,
-	"batch_size": 4,
-
-	"max_iters": 50000,
-	"eval_interval": 2000,
-	"log_interval": 200,
-	"eval_iters": 200,
-
-	"decay_lr": True,
-	"lr_decay_iters": 50000,
-	"learning_rate": 3e-3,
-	"cooldown_frac": 0.4,
-	"warmup_iters": 2000,
-	"min_lr": 3e-4
-}
-
-# save the text in a text file
-init(autoreset=True)
-ansi_escape = regex.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-
-# various inits, derived attributes, I/O setup
-ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
-if ddp:
-	init_process_group(backend='nccl')
-	ddp_rank = int(os.environ['RANK'])
-	ddp_local_rank = int(os.environ['LOCAL_RANK'])
-	ddp_world_size = int(os.environ['WORLD_SIZE'])
-	device = f'cuda:{ddp_local_rank}'
-	torch.cuda.set_device(device)
-	master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
-	seed_offset = ddp_rank # each process gets a different seed
-
-# if not ddp, we are running on a single gpu, and one process
-else:
-	master_process = True
-	seed_offset = 0
-	ddp_world_size = 1
-
-if master_process:
-	os.makedirs(CONFIG["checkpoints"]["path"], exist_ok=True)
-log_path = CONFIG["checkpoints"]["path"]
-
-torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-
-# set device
-device_type = "cuda" if torch.cuda.is_available() and sys.argv[3] == "cuda" else "cpu"
-init_from = CONFIG["init_from"][11:].strip("/") if CONFIG["init_from"].startswith("pretrained,") else "scratch"
-init_seed_offset = random.randint(1, 2000) if CONFIG["init_from"].startswith("pretrained,") else 0
-
-# init seed
-if CONFIG["seed"] != "auto":
-	seed = CONFIG["seed"] + init_seed_offset + seed_offset
-
-	if torch.cuda.is_available():
-		torch.cuda.manual_seed(seed)
-	torch.manual_seed(seed)
-	random.seed(seed)
-
-# print the device
-if master_process:
-	print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
-	print0("Training on", f"{Fore.YELLOW}{Style.BRIGHT}{device_type}", log_path=log_path)
-
-# load model, optimizer & stats if asked
-stats_checkpoint = None
-model_checkpoint = None
-optimizer_checkpoint = None
-
-if init_from != "scratch" and os.path.isdir(init_from):
-	model_checkpoint = torch.load(f"{init_from}/model.bin")
-	optimizer_checkpoint = torch.load(f"{init_from}/optimizer.bin")
-	with open(f"{init_from}/stats.json", "r", encoding="utf-8") as f:
-		stats_checkpoint = json.load(f)
-
-# load stats
-stats = stats_checkpoint if stats_checkpoint is not None else {
-	"step": 0,
-	"loss": {
-		"train": [],
-		"test": [],
-		"val": []
-	},
-	"lr": []
-}
-
-# create an instance of the model
-hyperparams = CONFIG["model_hyperparams"] if model_checkpoint is None else model_checkpoint["hyperparams"]
-
-arch = sys.argv[2]
-if arch == "silia":
-	conf = Config(**hyperparams)
-	model = Silia(conf)
-
-elif arch == "gpt":
-	conf = GPTConfig(**hyperparams)
-	model = GPT(conf)
-
-# load the state dict
-if model_checkpoint is not None:
-	model.load_state_dict(model_checkpoint["model"])
-model.to(device_type)
-
-# optimizers!
-optimizer_hyperparams = CONFIG["optimizer_hyperparams"] if optimizer_checkpoint is None else optimizer_checkpoint["hyperparams"]
-
-# collect the parameters to optimize
-hidden_matrix_params = [p for n, p in model.blocks.named_parameters() if p.ndim >= 2 and "embed" not in n]
-embed_params = [p for n, p in model.named_parameters() if "embed" in n]
-adam_params = embed_params
-
-if not optimizer_hyperparams["use_muon"]:
-	adam_params = embed_params + hidden_matrix_params
-
-# init the optimizer(s)
-# small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
-# discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
-optimizer1 = torch.optim.AdamW(
-	adam_params, lr=CONFIG["learning_rate"], betas=(optimizer_hyperparams["beta1"], optimizer_hyperparams["beta2"]),
-	eps=optimizer_hyperparams["eps"], weight_decay=optimizer_hyperparams["weight_decay"], fused=True
-)
-optimizers = [optimizer1]
-
-if optimizer_hyperparams["use_muon"]:
-	muon = MuonDist if ddp else Muon
-	optimizer2 = muon(
-		hidden_matrix_params,
-		lr=CONFIG["learning_rate"],
-		momentum=optimizer_hyperparams["momentum"],
-		weight_decay=optimizer_hyperparams["weight_decay"]
-	)
-	optimizers.append(optimizer2)
-
-# load optimizer(s) state dict if loading from checkpoint
-if optimizer_checkpoint is not None:
-	for o, s in zip(optimizers, optimizer_checkpoint["model"]):
-		o.load_state_dict(s)
-
 class dataloader:
 	def __init__(self, path, block_size, batch_size, data_division=0.8, isfile=True):
 		self.path = path
@@ -246,33 +78,17 @@ class dataloader:
 		self.val = torch.tensor(self.val, dtype=torch.int64)
 		return n_train_toks, n_val_toks
 
-	def next_batch(self, split):
+	def next_batch(self, split, device):
 		data = self.train if split == "train" else self.val
 		ix = torch.randint(len(data) - self.block_size, (self.batch_size,))
 		x = torch.stack([data[i:i + self.block_size] for i in ix])
 		y = torch.stack([data[i+1:i+1 + self.block_size] for i in ix])
-		return x.to(device_type), y.to(device_type)
+		return x.to(device), y.to(device)
 
-# helps estimate an arbitrarily accurate loss over either split using many batches
-@torch.no_grad()
-def estimate_loss(model, next_batch):
-	out = {}
-	model.eval()
-	for split in ["train", "val"]:
-		losses = torch.zeros(CONFIG["eval_iters"])
-		for k in track(range(CONFIG["eval_iters"]), description=f"{Fore.WHITE}{Style.BRIGHT}calc {Fore.WHITE}{Style.DIM}{split} loss{Style.RESET_ALL}"):
-			X, Y = next_batch(split)
-			_, loss = model(X, Y)
-			losses[k] = loss.item()
-		out[split] = losses.mean()
-	model.train()
-	return out
-
-def get_state(model, type):
+def get_state(model, hyperparams, type, device):
+	hp = hyperparams
 	if type == "model":
 		state_dict = model.state_dict()
-		hp = hyperparams
-
 		unwanted_prefix = '_orig_mod.'
 
 		for k, v in list(state_dict.items()):
@@ -281,13 +97,185 @@ def get_state(model, type):
 
 	elif type == "optimizer":
 		state_dict = [o.state_dict() for o in model]
-		hp = optimizer_hyperparams
 
 	return {
-		"device": device_type,
+		"device": device,
 		"model": state_dict,
 		"hyperparams": hp
 	}
+
+# helps estimate an arbitrarily accurate loss over either split using many batches
+@torch.no_grad()
+def estimate_loss(model, next_batch, device):
+	out = {}
+	model.eval()
+	for split in ["train", "val"]:
+		losses = torch.zeros(CONFIG["eval_iters"])
+		for k in track(
+			range(CONFIG["eval_iters"]),
+			description=f"{Fore.WHITE}{Style.BRIGHT}calc {Fore.WHITE}{Style.DIM}{split} loss{Style.RESET_ALL}"
+        ):
+			X, Y = next_batch(split, device)
+			_, loss = model(X, Y)
+			losses[k] = loss.item()
+		out[split] = losses.mean()
+	model.train()
+	return out
+
+# init
+init(autoreset=True)
+ansi_escape = regex.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+
+# load config
+CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.argv) > 1 else {
+	"dataset": {
+		"data_division": 0.8,
+		"load_from_file": True,
+		"path": "data/webtext.bin"
+	},
+	"checkpoints": {
+		"path": "bin/c1",
+		"interval": 2000,
+		"create_checkpoints": True
+	},
+	"model_hyperparams": {
+		"vocab_size": 16384,
+		"block_size": 1024,
+		"n_layer": 4,
+		"n_head": 16,
+		"n_rank": 4,
+		"n_embd": 128
+	},
+	"optimizer_hyperparams": {
+		"eps": 1e-10,
+		"beta1": 0.9,
+		"beta2": 0.95,
+		"momentum": 0.95,
+		"weight_decay": 1e-1
+	},
+	"encoder_path": "bin/cl8k.bin",
+	"init_from": "scratch",
+	"compile": True,
+	"seed": 18,
+
+	"batch_size": 16,
+	"gradient_accumulation_steps": 1,
+
+	"eval_iters": 200,
+	"max_iters": 100000,
+	"log_interval": 2000,
+	"eval_interval": 5000,
+
+	"decay_lr": True,
+	"min_lr": 4e-4,
+	"warmup_iters": 5000,
+	"cooldown_frac": 0.2,
+	"learning_rate": 4e-3,
+	"lr_decay_iters": 100000
+}
+
+# various inits, derived attributes, I/O setup
+ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
+if ddp:
+	init_process_group(backend='nccl')
+	ddp_rank = int(os.environ['RANK'])
+	ddp_local_rank = int(os.environ['LOCAL_RANK'])
+	ddp_world_size = int(os.environ['WORLD_SIZE'])
+	device = f'cuda:{ddp_local_rank}'
+	torch.cuda.set_device(device)
+	master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
+	seed_offset = ddp_rank # each process gets a different seed
+
+# if not ddp, we are running on a single gpu, and one process
+else:
+	master_process = True
+	seed_offset = 0
+	ddp_world_size = 1
+
+if master_process:
+	os.makedirs(CONFIG["checkpoints"]["path"], exist_ok=True)
+log_path = CONFIG["checkpoints"]["path"]
+
+# set device
+device_type = "cuda" if torch.cuda.is_available() and sys.argv[2] == "cuda" else "cpu"
+init_from = CONFIG["init_from"][11:].strip("/") if CONFIG["init_from"].startswith("pretrained,") else "scratch"
+init_seed_offset = random.randint(18, 2007) if CONFIG["init_from"].startswith("pretrained,") else 0
+
+# init seed
+if CONFIG["seed"] != "auto":
+	seed = CONFIG["seed"] + init_seed_offset + seed_offset
+	random.seed(seed)
+	torch.manual_seed(seed)
+	if torch.cuda.is_available():
+		torch.cuda.manual_seed(seed)
+
+# print the device
+if master_process:
+	print0(f"config: {Fore.WHITE}{Style.DIM}`{json.dumps(CONFIG)}`", overwrite=(init_from == "scratch"), log_path=log_path)
+	print0("Training on", f"{Fore.YELLOW}{Style.BRIGHT}{device_type}", log_path=log_path)
+
+# load model, optimizer & stats if asked
+stats_checkpoint = None
+model_checkpoint = None
+optimizer_checkpoint = None
+
+if init_from != "scratch" and os.path.isdir(init_from):
+	model_checkpoint = torch.load(f"{init_from}/model.bin")
+	optimizer_checkpoint = torch.load(f"{init_from}/optimizer.bin")
+	with open(f"{init_from}/stats.json", "r", encoding="utf-8") as f:
+		stats_checkpoint = json.load(f)
+
+# load stats
+stats = stats_checkpoint if stats_checkpoint is not None else {
+	"step": 0,
+	"loss": {
+		"train": [],
+		"test": [],
+		"val": []
+	},
+	"lr": []
+}
+
+# create an instance of the model
+hyperparams = CONFIG["model_hyperparams"] if model_checkpoint is None else model_checkpoint["hyperparams"]
+conf = Config(**hyperparams)
+model = Silia(conf)
+
+# load the state dict
+if model_checkpoint is not None:
+	model.load_state_dict(model_checkpoint["model"])
+model.to(device_type)
+
+# optimizers!
+optimizer_hyperparams = CONFIG["optimizer_hyperparams"] if optimizer_checkpoint is None else optimizer_checkpoint["hyperparams"]
+
+# collect the parameters to optimize
+hidden_matrix_params = [p for n, p in model.blocks.named_parameters() if p.ndim >= 2 and "embed" not in n]
+embed_params = [p for n, p in model.named_parameters() if "embed" in n]
+adam_params = embed_params
+
+# init the optimizer(s)
+# small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
+# discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
+optimizer1 = torch.optim.AdamW(
+	adam_params, lr=CONFIG["learning_rate"], betas=(optimizer_hyperparams["beta1"], optimizer_hyperparams["beta2"]),
+	eps=optimizer_hyperparams["eps"], weight_decay=optimizer_hyperparams["weight_decay"], fused=True
+)
+
+muon = MuonDist if ddp else Muon
+optimizer2 = muon(
+	hidden_matrix_params,
+	lr=CONFIG["learning_rate"],
+	momentum=optimizer_hyperparams["momentum"],
+	weight_decay=optimizer_hyperparams["weight_decay"]
+)
+
+optimizers = [optimizer1, optimizer2]
+
+# load optimizer(s) state dict if loading from checkpoint
+if optimizer_checkpoint is not None:
+	for o, s in zip(optimizers, optimizer_checkpoint["model"]):
+		o.load_state_dict(s)
 
 # load encoder
 enc = Encoder()
@@ -316,6 +304,11 @@ if master_process:
 		log_path=log_path
 	)
 
+	# compile the model
+	if CONFIG["compile"] == True:
+		print0(f"compiling the model... {Fore.WHITE}{Style.DIM}(takes a ~minute)", log_path=log_path)
+		model = torch.compile(model)
+
 	# training loop
 	# start training the model
 	print0("started training", log_path=log_path)
@@ -324,6 +317,7 @@ if master_process:
 if ddp:
 	model = DDP(model, device_ids=[ddp_local_rank])
 
+# time variables
 start_time = eval_t0 = test_t0 = time.time()
 n_steps = CONFIG["max_iters"] - stats["step"] + 1
 steps_per_epoch = int((n_train_toks + n_val_toks) / (hyperparams["block_size"] * CONFIG["batch_size"]))
@@ -366,7 +360,7 @@ for _ in range(n_steps):
 
 	# training section
 	for micro_step in range(CONFIG["gradient_accumulation_steps"]):
-		X, Y = dataset.next_batch("train")
+		X, Y = dataset.next_batch("train", device_type)
 		# in DDP training we only need to sync gradients at the last micro step.
 		# the official way to do this is with model.no_sync() context manager, but
 		# I really dislike that this bloats the code and forces us to repeat code
@@ -379,10 +373,9 @@ for _ in range(n_steps):
 		loss.backward() # backward pass
 	torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
-	if optimizer_hyperparams["use_muon"]:
-		for group in optimizers[1].param_groups:
-			frac = min(stats["step"] / 300, 1) # momentum warmup for muon
-			group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
+	for group in optimizers[1].param_groups:
+		frac = min(stats["step"] / 300, 1) # momentum warmup for muon
+		group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
 
 	## step the optimizers
 	for o in optimizers:
@@ -409,7 +402,7 @@ for _ in range(n_steps):
 
 	## log train-val loss
 	if stats["step"] > 0 and stats["step"] % CONFIG["eval_interval"] == 0 and master_process:
-		losses = estimate_loss(model, dataset.next_batch)
+		losses = estimate_loss(model, dataset.next_batch, device_type)
 		eval_t1 = time.time()
 		eval_dt = eval_t1 - eval_t0
 		eval_t0 = eval_t1
@@ -431,7 +424,11 @@ for _ in range(n_steps):
 		stats["loss"]["val"].append(losses["val"].item())
 
 		### sample generation
-		out = raw_model.generate([random.randint(0, len(enc.vocab) + len(enc.special_tokens))], hyperparams["block_size"], device=device_type)[0].tolist()
+		out = raw_model.generate(
+			[random.randint(0, len(enc.vocab) + len(enc.special_tokens))],
+			hyperparams["block_size"],
+			device=device_type
+        )[0].tolist()
 		print0(f"{Fore.WHITE}{Style.DIM}```\n{enc.decode(out)}\n```", log_path=log_path)
 
 	## log test loss
@@ -460,7 +457,18 @@ for _ in range(n_steps):
 	stats["step"] += 1
 
 if master_process:
+	ck_save_path = f"{CONFIG['checkpoints']['path']}/final"
 	print0("total time:", calc_total_time(time.time() - start_time), log_path=log_path)
+	print0(f"final checkpoint saved in `{ck_save_path}` folder", log_path=log_path)
+
+	# create folder for every checkpoint
+	os.makedirs(ck_save_path, exist_ok=True)
+
+	# save model, optimizer & stats
+	torch.save(get_state(raw_model, "model"), f"{ck_save_path}/model.bin")
+	torch.save(get_state(optimizers, "optimizer"), f"{ck_save_path}/optimizer.bin")
+	with open(f"{ck_save_path}/stats.json", "w", encoding="utf-8") as f:
+		json.dump(stats, f, indent=4)
 
 if ddp:
 	destroy_process_group()
