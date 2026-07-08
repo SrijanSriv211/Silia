@@ -1,5 +1,5 @@
 from colorama import init, Fore, Style
-import pickle, regex, json, time, os
+import pickle, regex, json, time
 
 init(autoreset=True)
 
@@ -295,12 +295,18 @@ class Encoder:
 		- model file is the critical one, intended for load()
 		"""
 		# write the model: to be used in load() later
-		with open(checkpoint, "wb") as f:
+		with open(checkpoint + ".bin", "wb") as f:
 			pickle.dump({
 				"pattern": self.pattern,
 				"special": self.special_tokens,
 				"vocab": self.vocab
 			}, f)
+
+		# write the model into text file 
+		with open(checkpoint + ".txt", "w", encoding="utf-8") as f:
+			f.write(f"pattern:\n{self.pattern}\n\n")
+			f.write(f"special:\n{self.special_tokens}\n\n")
+			f.write(f"vocab:\n{str(self.vocab)[1:-1].replace(', ', '\n')}\n")
 
 	def load(self, checkpoint: str):
 		# read the model file
