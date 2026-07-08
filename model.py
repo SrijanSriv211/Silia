@@ -37,9 +37,8 @@ class HydraLatentAttention(nn.Module):
 
 		self.residual = nn.Linear(d_hidden, 2*d_model, bias=False)
 		self.aft_qkv = nn.Linear(d_hidden, 3*d_model, bias=False)
-		self.qkvg_l = nn.Linear(d_hidden, 3*l_model, bias=False)
-		self.qk_u = nn.Linear(2*l_model, 2*d_model, bias=False)
-		self.out = nn.Linear(l_model, d_model, bias=False)
+		self.qkvg_u = nn.Linear(2*l_model, 4*d_model, bias=False)
+		self.qkvg_l = nn.Linear(d_hidden, 2*l_model, bias=False)
 
 	# https://arxiv.org/abs/2405.04434
 	# deepseek mla implementation without decoupled rope,
@@ -48,9 +47,8 @@ class HydraLatentAttention(nn.Module):
 		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
 		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		c_q, c_kv, c_g = self.qkvg_l(x).chunk(3, dim=-1)
-		q, k = self.qk_u(torch.cat([c_q, c_kv], dim=-1)).view(B, T, self.n_head, -1).chunk(2, dim=-1)
-		v, g = c_kv.view(B, T, self.n_rank, -1), c_g.view(B, T, self.n_rank, -1)
+		c_qg, c_kv = self.qkvg_l(x).chunk(2, dim=-1) # `c_kv` will be stored in the KV cache
+		q, k, v, g = self.qkvg_u(torch.cat([c_qg, c_kv], dim=-1)).view(B, T, self.n_head, -1).chunk(4, dim=-1)
 
 		# apply rotary embeddings to queries and keys to get relative positional encoding
 		cos, sin = cos_sin
@@ -73,10 +71,7 @@ class HydraLatentAttention(nn.Module):
 		y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
 
 		# re-assemble all head outputs side by side
-		y = y.transpose(1, 2).contiguous().view(B, T, -1)
-
-		# absorb `Wv_up` into output projection
-		return self.out(y).view(B, T, self.n_head, -1)
+		return y.transpose(1, 2).contiguous()
 
 	# https://arxiv.org/abs/2105.14103
 	# i'm using apple's attention free transformer
@@ -123,12 +118,12 @@ class Block(nn.Module):
 		super().__init__()
 		# two-thirds trick for hidden dimension to keep compute constant
 		d_model = config.n_embd * config.n_head
-		d_hidden = int(d_model * 4 / 3)
+		d_hidden = int(config.n_embd * 4 / 3)
 
-		self.a1 = HydraLatentAttention(config, d_model)
+		self.a1 = HydraLatentAttention(config, config.n_embd)
 		self.a2 = HydraLatentAttention(config, d_hidden)
 		self.l1 = nn.Linear(d_model, 2*d_hidden, bias=False)
-		self.l2 = nn.Linear(d_hidden, d_model, bias=False)
+		self.l2 = nn.Linear(d_model // 2, config.n_embd, bias=False)
 
 	def forward(self, x, cos_sin):
 		y = self.a1(x, cos_sin)
@@ -144,13 +139,12 @@ class Silia(nn.Module):
 		super().__init__()
 		assert config.vocab_size is not None
 		assert config.block_size is not None
-		d_model = config.n_embd * config.n_head
 		self.config = config
 
 		# factorized token embeddings
-		self.embed = nn.Embedding(config.vocab_size, d_model)
+		self.embed = nn.Embedding(config.vocab_size, config.n_embd)
 		self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
-		self.unembed = nn.Linear(d_model, config.vocab_size, bias=False)
+		self.unembed = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 		self.embed.weight = self.unembed.weight
 
 		# to support meta device initialization, we init the rotary embeddings here, but it's fake
