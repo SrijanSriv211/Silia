@@ -4,7 +4,6 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from model import Silia, Config
 from encoder import Encoder
 from optimizer import MuonDist, Muon
-from transformer import GPTConfig, GPT
 
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -143,8 +142,8 @@ CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.
 		"block_size": 1024,
 		"n_layer": 4,
 		"n_head": 16,
-		"n_rank": 4,
-		"n_embd": 128
+		"n_embd": 128,
+		"d_model": 128
 	},
 	"optimizer_hyperparams": {
 		"eps": 1e-10,
@@ -167,11 +166,11 @@ CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.
 	"eval_interval": 5000,
 
 	"decay_lr": True,
-	"min_lr": 4e-4,
 	"warmup_iters": 5000,
 	"cooldown_frac": 0.2,
 	"learning_rate": 4e-3,
-	"lr_decay_iters": 100000
+	"lr_decay_iters": 100000,
+	"min_learning_rate": 4e-4
 }
 
 # various inits, derived attributes, I/O setup
@@ -341,7 +340,7 @@ for _ in range(n_steps):
 
 	## 3) if stats["step"] > lr_decay_iters, lr = min learning rate
 	elif stats["step"] > CONFIG["lr_decay_iters"]:
-		lr = CONFIG["min_lr"]
+		lr = CONFIG["min_learning_rate"]
 
 	## 4) in between, use cosine decay down to min learning rate
 	else:
@@ -350,7 +349,7 @@ for _ in range(n_steps):
 
 		assert 0 <= decay_ratio <= 1
 		coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
-		lr = CONFIG["min_lr"] + coeff * (CONFIG["learning_rate"] - CONFIG["min_lr"])
+		lr = CONFIG["min_learning_rate"] + coeff * (CONFIG["learning_rate"] - CONFIG["min_learning_rate"])
 
 	## set optimizers' learning rate
 	for o in optimizers:

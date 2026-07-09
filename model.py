@@ -8,8 +8,8 @@ class Config:
 	block_size: int = 1024
 	n_layer: int = 8
 	n_head: int = 8
-	n_rank: int = 3
 	n_embd: int = 64
+	d_model: int = 256
 
 def norm(x):
 	return F.rms_norm(x, (x.size(-1),))
@@ -26,19 +26,17 @@ def apply_rotary_emb(x, cos, sin):
 # inspired from Qwen Team's HydraHead,
 # process half heads with ELA and other half with AFT
 class HydraLatentAttention(nn.Module):
-	def __init__(self, config: Config, d_hidden):
+	def __init__(self, config: Config, d_in, d_out):
 		super().__init__()
 		assert config.n_head % 2 == 0
-		self.n_rank = config.n_rank
 		self.n_head = config.n_head // 2
 		self.n_embd = config.n_embd
-		d_model = self.n_embd * self.n_head
-		l_model = self.n_embd * self.n_rank
+		n_qkv = self.n_embd * self.n_head
 
-		self.residual = nn.Linear(d_hidden, 2*d_model, bias=False)
-		self.aft_qkv = nn.Linear(d_hidden, 3*d_model, bias=False)
-		self.qkvg_u = nn.Linear(2*l_model, 4*d_model, bias=False)
-		self.qkvg_l = nn.Linear(d_hidden, 2*l_model, bias=False)
+		self.qkvg_u = nn.Linear(self.n_embd, 4*n_qkv, bias=False)
+		self.qkvg_l = nn.Linear(d_in, self.n_embd, bias=False)
+		self.aft_qkv = nn.Linear(d_in, 3*n_qkv, bias=False)
+		self.out = nn.Linear(2*n_qkv, d_out, bias=False)
 
 	# https://arxiv.org/abs/2405.04434
 	# deepseek mla implementation without decoupled rope,
@@ -101,38 +99,26 @@ class HydraLatentAttention(nn.Module):
 	def forward(self, x, cos_sin):
 		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
-		# rmsnorm & learned residual pathway for richer gradients
-		t = norm(x)
-		r = self.residual(x)
-
 		# first half heads to ela & next half to aft
+		t = norm(x)
 		ela = self.exclusive_latent_attention(t, cos_sin)
 		aft = self.attention_free_transformer(t)
 
 		# interleave heads of ela & aft
-		y = torch.stack([ela, aft], dim=3).flatten(2, 3) # (B, T, 2*nh, hs)
-		return r + y.view(B, T, -1)
+		y = torch.stack([ela, aft], dim=3).flatten(2, 3).view(B, T, -1) # (B, T, 2*nh, hs) -> (B, T, 2K)
+		return self.out(norm(y))
 
 class Block(nn.Module):
 	def __init__(self, config: Config):
 		super().__init__()
 		# two-thirds trick for hidden dimension to keep compute constant
-		d_model = config.n_embd * config.n_head
-		d_hidden = int(config.n_embd * 4 / 3)
-
-		self.a1 = HydraLatentAttention(config, config.n_embd)
-		self.a2 = HydraLatentAttention(config, d_hidden)
-		self.l1 = nn.Linear(d_model, 2*d_hidden, bias=False)
-		self.l2 = nn.Linear(d_model, config.n_embd, bias=False)
+		self.a1 = HydraLatentAttention(config, config.n_embd, 2*config.d_model)
+		self.a2 = HydraLatentAttention(config, config.d_model, config.n_embd)
 
 	def forward(self, x, cos_sin):
-		y = self.a1(x, cos_sin)
-
-		u, v = self.l1(y).chunk(2, dim=-1)
+		u, v = self.a1(x, cos_sin).chunk(2, dim=-1)
 		y = u * F.silu(v)
-
-		y = self.a2(y, cos_sin)
-		return x + self.l2(y)
+		return x + self.a2(y, cos_sin)
 
 class Silia(nn.Module):
 	def __init__(self, config: Config):

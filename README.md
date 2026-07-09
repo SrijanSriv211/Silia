@@ -98,10 +98,10 @@ $$A = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
 
 $$\text{Y} = \text{A}W_O$$
 
-The above equation is what was introduced in the now famous _Attention Is All You Need_ paper. This is the equation which is used for autoregressive language modelling where  $W_Q$ is the query matrix, $W_K$ is key matrix, $W_V$ is value matrix, $W_O$ is output projection matrix, $M$ is a causal attention mask and $d_k$ is dimension of the key vectors.
+The above equation is what was introduced in the now famous _Attention Is All You Need_ paper. This is the equation which is used for auto-regressive language modelling where  $W_Q$ is the query matrix, $W_K$ is key matrix, $W_V$ is value matrix, $W_O$ is output projection matrix, $M$ is a causal attention mask and $d_k$ is dimension of the key vectors.
 
 #### 4.2.3. Gated Attention
-Gated attention was introduced by Qwen Team in their paper _Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free_ where they showed the simple modification-applying a head-specific sigmoid gate after the Scaled Dot-Product Attention (SDPA) consistently improved performance. The modification also enhanced training stability, tolerated larger learning rates and improved scaling properties. Notably, it was also found that this sparse gating mechanism mitigates the `attention sink` and enhances long-context extrapolation performance.
+Gated attention was introduced by Qwen Team in their paper _Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free_ where they showed the simple modification-applying a head-specific $sigmoid$ gate after the Scaled Dot-Product Attention (SDPA) consistently improved performance. The modification also enhanced training stability, tolerated larger learning rates and improved scaling properties. Notably, it was also found that this sparse gating mechanism mitigates the `attention sink` and enhances long-context extrapolation performance.
 
 $$Q = XW_Q, K=XW_K, V=XW_V, G=XW_G$$
 
@@ -410,6 +410,12 @@ Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N
 Zihan Qiu, Zekun Wang, Bo Zheng, Zeyu Huang, Kaiyue Wen, Songlin Yang, Rui Men, Le Yu, Fei Huang, Suozhi Huang, Dayiheng Liu, Jingren Zhou, Junyang Lin, (2025). Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free. _arXiv preprint arXiv:2505.06708_.
 
 Shuangfei Zhai, (2026). Exclusive Self Attention. _arXiv preprint arXiv:2603.09078_.
+
+DeepSeek-AI, (2024). DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model. _arXiv preprint arXiv:2405.04434_.
+
+Shuangfei Zhai, Walter Talbott, Nitish Srivastava, Chen Huang, Hanlin Goh, Ruixiang Zhang, Josh Susskind, (2021). An Attention Free Transformer. _arXiv preprint arXiv:2105.14103_.
+
+Zhentao Tan, Wei Chen, Jingyi Shen, Yao Liu, Xu Shen, Yue Wu, Jieping Ye, (2026). HydraHead: From Head-Level Functional Heterogeneity to Specialized Attention Hybridization. _arXiv preprint arXiv:2606.20097_.
 
 DeepSeek-AI, (2026). DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence. _arXiv preprint arXiv:2606.19348_.
 
