@@ -3,8 +3,9 @@ import pandas as pd, json, sys, os
 
 special_tokens = ["<|end-text|>", "<|actor|>"]
 vocab_size = int(sys.argv[1]) - len(special_tokens)
-dataset_path = sys.argv[2]
-outpath = sys.argv[3]
+most_common = int(sys.argv[2])
+dataset_path = sys.argv[3]
+outpath = sys.argv[4]
 
 dir = os.path.split(outpath)[0]
 os.makedirs(dir, exist_ok=True)
@@ -28,7 +29,7 @@ else:
 
 #* set `vocab_size` in `config.json`
 enc = Encoder()
-enc.train(text, vocab_size)
+enc.train(text, vocab_size, most_common)
 enc.register_special_tokens(*special_tokens)
 enc.save(outpath)
 print("Special Tokens:\n", enc.special_tokens)
