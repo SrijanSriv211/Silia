@@ -82,7 +82,7 @@ class Encoder:
 		self.inverse_special_tokens = {}
 		self.vocab = {idx: bytes([idx]) for idx in range(256)} # idx -> bytes
 
-	def train(self, text, vocab_size=256, most_common=100_000):
+	def train(self, text, vocab_size=256, chunk_range=100_000):
 		"""
 		- path: [name, is_dir]
 		- vocab_size: max number of merges to be made - 256 bytes
@@ -96,6 +96,9 @@ class Encoder:
 			f"{Fore.WHITE}{Style.BRIGHT}{len(set(text))}", "unique characters"
 		)
 
+		if chunk_range is not None:
+			print("ranged chunks has", f"{Fore.WHITE}{Style.BRIGHT}{chunk_range/1e6}M", "chunks")
+
 		# split the text up into text chunks
 		t = time.time()
 		text_chunks = regex.findall(self.compiled_pattern, text)
@@ -105,7 +108,7 @@ class Encoder:
 		t = time.time()
 		ids = Counter([i for i in text_chunks if len(i) > 1])
 		print("total unique chunks:", len(ids.most_common()))
-		ids, idsw = map(list, zip(*ids.most_common(most_common)))
+		ids, idsw = map(list, zip(*ids.most_common(chunk_range)))
 		print("dedup:", calc_total_time(time.time() - t))
 		del text_chunks
 

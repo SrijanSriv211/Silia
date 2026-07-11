@@ -7,6 +7,8 @@ init(autoreset=True)
 dataset_path = sys.argv[1]
 enc_path = sys.argv[2]
 outpath = sys.argv[3]
+# -1 becase we later add `<|end-text|>` special token
+seq_len = None if sys.argv[4] == "None" else int(sys.argv[4]) - 1
 
 enc = Encoder()
 enc.load(enc_path)
@@ -14,6 +16,13 @@ data = []
 
 df = pd.read_parquet(dataset_path)
 data = df["text"].tolist()
+
+if seq_len is not None:
+	data = [
+		s[i:i+seq_len]
+		for s in data
+		for i in range(0, len(s), seq_len)
+	]
 
 lsum = lambda x: sum([len(i) for i in x])
 
