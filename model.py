@@ -176,19 +176,20 @@ class Silia(nn.Module):
 		return logits, loss
 
 	@torch.no_grad()
-	def generate(self, idx, max_new_tokens, device, temperature=1.0, top_k=None):
+	def generate(self, idx, max_new_tokens, sink_tok, device, temperature=0.8, top_k=50):
 		idx = torch.tensor(idx, dtype=torch.int64, device=device).unsqueeze(0)
+		sink_tok = torch.tensor([sink_tok], dtype=torch.int64, device=device).unsqueeze(0)
 
 		for _ in range(max_new_tokens):
 			# our very first step, pass the initial sequence context to the model
 			# if the sequence context is growing too long we must crop it at block_size
 			idx_cond = idx[:, -self.rotary_block_size:] if idx.size(1) > self.rotary_block_size else idx
+			idx_cond = torch.cat([sink_tok, idx_cond], dim=1)
 
 			# forward the model to get the logits for the index in the sequence
 			logits, _ = self(idx_cond)
 			logits = logits[:, -1, :]
 
-			# https://github.com/karpathy/nanoGPT/pull/546/
 			# pluck the logits at the final step and scale by desired temperature
 			if temperature > 0:
 				logits = logits / temperature

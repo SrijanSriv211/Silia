@@ -48,12 +48,13 @@ def calc_total_time(seconds):
 	return ", ".join(t) if t else "0 seconds"
 
 class dataloader:
-	def __init__(self, path, block_size, batch_size, data_division=0.8, isfile=True):
+	def __init__(self, path, block_size, batch_size, sink_tok, data_division=0.8, isfile=True):
 		self.path = path
 		self.data_division = data_division
 		self.block_size, self.batch_size = block_size, batch_size
 
 		self.files = [path] if isfile else [os.path.join(path, i) for i in os.listdir(path) if os.path.isfile(os.path.join(path, i))]
+		self.sink_col = torch.full((self.batch_size, 1), sink_tok)
 
 	def load_dataset(self):
 		self.train, self.val = [], []
@@ -80,8 +81,8 @@ class dataloader:
 	def next_batch(self, split, device):
 		data = self.train if split == "train" else self.val
 		ix = torch.randint(len(data) - self.block_size, (self.batch_size,))
-		x = torch.stack([data[i:i + self.block_size] for i in ix])
-		y = torch.stack([data[i+1:i+1 + self.block_size] for i in ix])
+		y = torch.stack([data[i:i + self.block_size] for i in ix])
+		x = torch.cat([self.sink_col, y[:, :-1]], dim=1) # x: prepend SINK, drop last token
 		return x.to(device), y.to(device)
 
 def get_state(model, hyperparams, type, device):
@@ -113,7 +114,7 @@ def estimate_loss(model, next_batch, device):
 		for k in track(
 			range(CONFIG["eval_iters"]),
 			description=f"{Fore.WHITE}{Style.BRIGHT}calc {Fore.WHITE}{Style.DIM}{split} loss{Style.RESET_ALL}"
-        ):
+		):
 			X, Y = next_batch(split, device)
 			_, loss = model(X, Y)
 			losses[k] = loss.item()
@@ -283,7 +284,7 @@ enc.load(CONFIG["encoder_path"])
 # load dataset
 dataset = dataloader(
 	CONFIG["dataset"]["path"],
-	hyperparams["block_size"], CONFIG["batch_size"],
+	hyperparams["block_size"], CONFIG["batch_size"], enc.special_tokens["<|actor|>"],
 	CONFIG["dataset"]["data_division"], CONFIG["dataset"]["load_from_file"]
 )
 n_train_toks, n_val_toks = dataset.load_dataset()
@@ -425,9 +426,9 @@ for _ in range(n_steps):
 		### sample generation
 		out = raw_model.generate(
 			[random.randint(0, len(enc.vocab) + len(enc.special_tokens))],
-			hyperparams["block_size"],
+			hyperparams["block_size"], enc.special_tokens["<|actor|>"],
 			device=device_type
-        )[0].tolist()
+		)[0].tolist()
 		print0(f"{Fore.WHITE}{Style.DIM}```\n{enc.decode(out)}\n```", log_path=log_path)
 
 	## log test loss
