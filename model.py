@@ -29,25 +29,19 @@ class HydraLatentAttention(nn.Module):
 	def __init__(self, config: Config, d_in, d_out):
 		super().__init__()
 		assert config.n_head % 2 == 0
-		self.n_head = config.n_head // 2
+		self.n_head = config.n_head
 		self.n_embd = config.n_embd
 		n_qkv = self.n_embd * self.n_head
 
-		self.qkvg_u = nn.Linear(self.n_embd, 4*n_qkv, bias=False)
-		self.qkvg_l = nn.Linear(d_in, self.n_embd, bias=False)
-		self.aft_qkv = nn.Linear(d_in, 3*n_qkv, bias=False)
-		self.out = nn.Linear(2*n_qkv, d_out, bias=False)
+		self.gate = nn.Linear(d_in, n_qkv//2)
+		self.qkv_u = nn.Linear(self.n_embd, 3*n_qkv, bias=False)
+		self.qkv_l = nn.Linear(d_in, self.n_embd, bias=False)
+		self.out = nn.Linear(n_qkv, d_out, bias=False)
 
 	# https://arxiv.org/abs/2405.04434
 	# deepseek mla implementation without decoupled rope,
 	# along with exclusive self attention & gated attention
-	def exclusive_latent_attention(self, x, cos_sin):
-		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-
-		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		c_qg, c_kv = self.qkvg_l(x).chunk(2, dim=-1) # `c_kv` will be stored in the KV cache
-		q, k, v, g = self.qkvg_u(torch.cat([c_qg, c_kv], dim=-1)).view(B, T, self.n_head, -1).chunk(4, dim=-1)
-
+	def exclusive_latent_attention(self, q, k, v, g, cos_sin):
 		# apply rotary embeddings to queries and keys to get relative positional encoding
 		cos, sin = cos_sin
 		q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
@@ -74,11 +68,8 @@ class HydraLatentAttention(nn.Module):
 	# https://arxiv.org/abs/2105.14103
 	# i'm using apple's attention free transformer
 	# can also use KDA or GDN linear attention, or Nemotron style Mamba as well
-	def attention_free_transformer(self, x):
-		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-
-		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		q, k, v = self.aft_qkv(x).chunk(3, dim=-1)
+	def attention_free_transformer(self, q, k, v):
+		B, T, nh, hs = q.size() # batch size, sequence length, embedding dimensionality (n_embd)
 		q, k = norm(q), norm(k) # QK norm
 
 		# exponentiate keys
@@ -94,15 +85,23 @@ class HydraLatentAttention(nn.Module):
 
 		# gate with query
 		y = torch.sigmoid(q) * y
-		return y.view(B, T, self.n_head, -1)
+		return y.view(B, T, nh, hs)
 
 	def forward(self, x, cos_sin):
 		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
-		# first half heads to ela & next half to aft
-		t = norm(x)
-		ela = self.exclusive_latent_attention(t, cos_sin)
-		aft = self.attention_free_transformer(t)
+		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
+		c_q, c_kv = self.qkv_l(norm(x)).chunk(2, dim=-1) # `c_kv` will be stored in the KV cache
+		qkv = self.qkv_u(torch.cat([c_q, c_kv], dim=-1)).view(B, T, self.n_head, -1)
+		g = self.gate(norm(x)).view(B, T, self.n_head // 2, -1)
+
+		# pluck out interleaving heads for ela & aft.
+		qkv_ela, qkv_aft = qkv.view(B, T, self.n_head // 2, 2, -1).unbind(dim=3)
+		q_ela, k_ela, v_ela = qkv_ela.chunk(3, dim=-1)
+		q_aft, k_aft, v_aft = qkv_aft.chunk(3, dim=-1)
+
+		ela = self.exclusive_latent_attention(q_ela, k_ela, v_ela, g, cos_sin)
+		aft = self.attention_free_transformer(q_aft, k_aft, v_aft)
 
 		# interleave heads of ela & aft
 		y = torch.stack([ela, aft], dim=3).flatten(2, 3).view(B, T, -1) # (B, T, 2*nh, hs) -> (B, T, 2K)
