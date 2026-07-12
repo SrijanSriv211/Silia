@@ -6,15 +6,15 @@ Srivastavavsrijan321@gmail.com<br>
 QCoreNest@gmail.com
 </p>
 
-v2, June 2026
+v2, July 2026
 
 
 ## Abstract
-Introduction of the Transformer neural network architecture in the famous `Attention Is All You Need` paper has created a huge wave of AI development in recent years. The scaled dot-product attention allows for information to be processed with higher efficiency and quality, which the previous RNN-based models lacked. However Transformer-based models comes with their own set of challenges, particularly with parameter efficiency for tiny scale models. At such tiny scale a Transformer model essentially uses more parameter than it really should. This regeim is very underexplored and for good reasons however exploring it might allow us to discover interesting insights about the Transformer. So here-in this paper I am introducing Silia, a novel neural network architecture designed for efficient modelling & classification tasks under severe parameter budget. Training against Andrej Karpathy's nanoGPT, Silia achieves comparable loss and generation quality with significantly less parameters. Along with when a 117M parameters model even after being undertrained on a ~100M tokens of synthetic dataset, Silia achieves losses similar to what scaling loss predict for a Transformer based 117M parameters model trained on ~100M tokens.
+Introduction of the Transformer neural network architecture in the famous `Attention Is All You Need` paper has created a huge wave of AI development in recent years. The scaled dot-product attention allows for information to be processed with higher efficiency and quality, which the previous RNN-based models lacked. However Transformer-based models comes with their own set of challenges, particularly with parameter efficiency for tiny scale models. At such tiny scale a Transformer model essentially uses more parameter than it really should. This regime is very under-explored and for good reasons however exploring it might allow us to discover interesting insights about the Transformer. So here-in this paper I am introducing Silia, a novel neural network architecture designed for efficient modelling & classification tasks under severe parameter budget. Training against Andrej Karpathy's nanoGPT, Silia achieves comparable loss and generation quality with significantly less parameters. Along with when a 117M parameters model even after being under-trained on a ~100M tokens of synthetic dataset, Silia achieves losses similar to what scaling loss predict for a Transformer based 117M parameters model trained on ~100M tokens.
 
 
 ## 1. Introduction
-The dominant trend in Transformer-based language models has been scaling: larger models, more data, more compute in pretraining and RL for CoT based reasoning capabilities to consistently yield better performance. This means that the smallest practical models such as Qwen, Gemma & GPT-OSS lie anywhere between 1B-20B parameters. Despite them being called "small", these models are still billions in parameters and are trained on trillions of tokens. This trajectory, as useful as it is, has widened the gap between general-purpose frontier research experiments and task-specific small research experiments.
+The dominant trend in Transformer-based language models has been scaling: larger models, more data, more compute in pre-training and RL for CoT based reasoning capabilities to consistently yield better performance. This means that the smallest practical models such as Qwen, Gemma & GPT-OSS lie anywhere between 1B-20B parameters. Despite them being called "small", these models are still billions in parameters and are trained on trillions of tokens. This trajectory, as useful as it is, has widened the gap between general-purpose frontier research experiments and task-specific small research experiments.
 
 This is where I introduce my neural network architecture which merges the _Attention_ layer with the _SwiGLU Feed Forward_ layer from the Transformer to save lots of parameters while preserving much of the original performance. This new architecture is what I call __Silia__ or __Silu in Attention__. **Silia** aims to reduce the number of parameters per block, especially at much smaller scale (100 million parameters or less) while achieving competitive performance and quality as a standard Transformer.
 
@@ -32,7 +32,7 @@ This is where I introduce my neural network architecture which merges the _Atten
 
 **Low-Rank Factorization** is a technique which decomposes large weight matrices into products of smaller matrices, which reduces the number of parameters and the computational cost. This has been used in e.g. Ma et al. for compressing a pretrained BERT model.
 
-**Smaller FFN Dimension** reduces the width of the feedforward network, which reduces the number of parameters and computational cost. For instance, in OpenAI's paper _Language Models are Unsupervised Multitask Learners_ the team used a 4x expansion for the FFN dimensions compared to the embedding dimensions, while in Meta's paper _The Llama 3 Herd of Models_, the Llama Team used a 3.5x expansion for the FFN dimensions compared to the embedding dimensions which resulted in reduced parameter count of the overall model which having very competitive performance.
+**Smaller FFN Dimension** reduces the width of the feed-forward network, which reduces the number of parameters and computational cost. For instance, in OpenAI's paper _Language Models are Unsupervised Multitask Learners_ the team used a 4x expansion for the FFN dimensions compared to the embedding dimensions, while in Meta's paper _The Llama 3 Herd of Models_, the Llama Team used a 3.5x expansion for the FFN dimensions compared to the embedding dimensions which resulted in reduced parameter count of the overall model which having very competitive performance.
 
 ### 2.2. Tiny Scale Language Models
 Ronen Eldan and Yuanzhi Li in their paper _TinyStories: How Small Can Language Models Be and Still Speak Coherent English?_ showed that models below 10 million total parameters or much simpler architectures such (with only one Transformer block) produces fluent and consistent stories with several paragraphs that are diverse and have almost perfect grammar, and demonstrate reasoning capabilities when trained on a synthetic dataset of short stories that only contain words that a typical 3 to 4-year-olds usually understand, generated by GPT-3.5 and GPT-4.
@@ -57,11 +57,10 @@ For demonstration I used 5 different datasets. _webtext-super-tiny_, _email-data
 Tesla M60 and H100 were made available thanks to the paper sponsor Tomi Yang.
 
 
-## 4. Silia (Silu In Attention)
-### 4.1. Model Architecture
-<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:90%;">
+## 4. Model Architecture
+<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:80%;">
 
-Merging of Attention and SwiGLU was inspired from 2 core ideas.
+Merging Attention and SwiGLU was inspired from 2 core ideas.
 
 Attention is dynamic and smart about which information to mix, but it has no strong non-linearity to actually transform that information. SwiGLU has the strong non-linearity but it cannot transform input in a way that Attention does.
 
@@ -77,8 +76,7 @@ $$y = x + MLP(RMSNorm(x)) + Attention(RMSNorm(x))$$
 
 and noted 15% faster training speed with small to zero degradation in quality.
 
-### 4.2. Mathematical Formulation
-#### 4.2.1. SwiGLU
+### 4.1. SwiGLU
 SwiGLU was introduced and used by Google in their (N Shazeer, 2020) paper _GLU Variants Improve Transformer_. Prior to this, the standard Transformer architecture heavily relied on simpler activations like ReLU or GeLU. The paper demonstrated that replacing standard feed-forward network layers with Gated Linear Units (GLUs), specifically those utilizing the _Swish_ activation function (SwiGLU) significantly improved training convergence and downstream model accuracy. Since then SwiGLU has been a popular choice for researchers to use in their Transformer models.
 
 $$\text{SwiGLU}(X) = (\text{SiLU}(XW_1) \odot XW_2)W_3$$
@@ -89,7 +87,7 @@ Here, $X$ is the hidden state of our input from previous layer. $W_1$ & $W_2$ ar
 
 $X$ usually has a shape _(B, T, C)_. $W_1$ & $W_2$ has a shape _(C, 4*C)_ each and $W_3$ has a shape _(4*C, C)_. Where `B` is batch size, `T` is sequence length and `C` is the embedding dimension.
 
-#### 4.2.2. Self-Attention
+### 4.2. Self-Attention
 Attention is the heart of Transformer and it needs no introduction.
 
 $$Q = XW_Q, K=XW_K, V=XW_V$$
@@ -100,139 +98,171 @@ $$\text{Y} = \text{A}W_O$$
 
 The above equation is what was introduced in the now famous _Attention Is All You Need_ paper. This is the equation which is used for auto-regressive language modelling where  $W_Q$ is the query matrix, $W_K$ is key matrix, $W_V$ is value matrix, $W_O$ is output projection matrix, $M$ is a causal attention mask and $d_k$ is dimension of the key vectors.
 
-#### 4.2.3. Gated Attention
-Gated attention was introduced by Qwen Team in their paper _Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free_ where they showed the simple modification-applying a head-specific $sigmoid$ gate after the Scaled Dot-Product Attention (SDPA) consistently improved performance. The modification also enhanced training stability, tolerated larger learning rates and improved scaling properties. Notably, it was also found that this sparse gating mechanism mitigates the `attention sink` and enhances long-context extrapolation performance.
+### 4.3. Hydra Latent Attention (HLA)
+Hydra Latent Attention is an attention mechanism which incorporates 5 novel ideas:
+- _Exclusive Self Attention (XSA)_ and _Attention Free Transformer (AFT)_ introduced by Apple.
+- _Gated Attention_ and _Hydra Head_ introduced by Qwen Team.
+- _Multi-Head Latent Attention_ introduced by DeepSeek-AI.
 
-$$Q = XW_Q, K=XW_K, V=XW_V, G=XW_G$$
+Let $X$ be our hidden state.
 
-$$A = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
+$$T = \text{RMSNorm}(X)$$
+
+$$\text{Q}_↓ = TW_{Q↓}, \text{K}_↓ = TW_{K↓}, \text{V}_↓ = TW_{V↓}$$
+
+$$\text{Q}_↑ = QW_{Q↑}, \text{K}_↑ = KW_{K↑}, \text{V}_↑ = VW_{V↑}$$
+
+Where,
+
+$W_{Q↓} \in R^{d_i \times d}$, $W_{K↓} \in R^{d_i \times d}$, $W_{V↓} \in R^{d_i \times d}$, $W_{Q↑} \in R^{d \times (d \times h)}$, $W_{K↑} \in R^{d \times (d \times h)}$ and $W_{V↑} \in R^{d \times (d \times h)}$
+
+The $\text{K}_↓$, $\text{V}_↓$ down projections will be stored in the $\text{KV}$ cache to save memory as proposed by DeepSeek-AI in their paper _DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model_. While $\text{Q}_↓$ down projection doesn't contribute in the $\text{KV}$ cache, it does help in reducing the number of parameters due to low-rank factorization.
+
+$$G=TW_G$$
+
+Where $W_G \in R^{d_i \times (d \times \frac{h}{2})}$
+
+The $G$ term was introduced by Qwen Team in their paper _Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free_ where they noted performing an element-wise multiplication of the $\text{sigmoid}$ gate with attention results in improved performance of the model along with mitigating the _attention-sink_ problem.
+
+Now this is where things get a little interesting. In another paper by the Qwen Team titled _HydraHead: From Head-Level Functional Heterogeneity to Specialized Attention Hybridization_ they introduced the concept of head-wise Full-Attention (FA) Linear-Attention (LA) hybrid instead of using a layer-wise hybrid which is more commonly used. In HydraHead the authors selected a some heads from $Q$, $K$ and $V$ tensors and allocated to FA which the rest was allocated to FA. This resulted in major reduction in $\text{KV}$ cache along with attention computation.
+
+In the paper the authors used _Gated DeltaNet (GDN)_ as their Linear Attention function however for _Hydra Latent Attention_ I choose to use Apple's _Attention Free Transformer_. There is no concrete and scientific reason behind it. It is purely a design decision mainly due to AFT's quick and simple implementation. We will refer to Attention Free Transformer as $\text{AFT}$ in our mathematical formulation.
+
+Assuming $\text{Q}_↑$, $\text{K}_↑$ and $\text{V}_↑$ has $n$ number of heads where $n$ is a positive integer divisible by 2. are placed in such a way:
+
+$$[H_1, H_2, H_3, H_4, H_5, H_6, H_7, H_8, ..., H_{n-3}, H_{n-2} H_{n-1}, H_n]$$
+
+We break the head dimension in half with an interleaving pattern and assign first half of it to _Exclusive Latent Attention (XLA)_ which is Multi-Head Latent Attention + Gated Attention + Exclusive Self Attention, and the second half to _Apple's Attention Free Transformer ($AFT$)_.
+
+$$\text{QKV-XLA} = [H_1, H_3, H_5, H_7, ..., H_{n-3}, H_{n-1}]$$
+
+$$\text{QKV-AFT} = [H_2, H_4, H_6, H_8, ..., H_{n-2}, H_n]$$
+
+Now we are ready to perform attention.
+
+$$Q_{XLA} = \text{RoPE}(Q_{XLA}), K_{XLA} = \text{RoPE}(K_{XLA}), V_{XLA} = \text{RoPE}(V_{XLA})$$
+
+$$Q_{XLA} = \text{RMSNorm}(Q_{XLA}), K_{XLA} = \text{RMSNorm}(K_{XLA})$$
+
+$$Q_{AFT} = \text{RMSNorm}(Q_{AFT}), K_{AFT} = \text{RMSNorm}(K_{AFT})$$
+
+$$A = \mathrm{softmax} \left(\frac{{Q_{XLA}}{K_{XLA}}^\top}{\sqrt{d_{k_{XLA}}}} + M\right){V_{XLA}}$$
 
 $$O = \text{A} \odot \sigma(G)$$
 
-$$Y = OW_O$$
+$$Y_1 = \text{XSA}(O)$$
 
-Here, $\sigma$ is the sigmoid activation function, $G$ is a linear transformation over our hidden state $X$ which is passed into our sigmoid activation function. 
+$$Y_2 = \text{AFT}(Q_{AFT}, K_{AFT}, V_{AFT})$$
 
-#### 4.2.4. Exclusive Self Attention (XSA)
-_Exclusive Self Attention_ introduced by Shuangfei Zhai was widely adopted in many leading solutions in OpenAI's parameter golf challenge. It is a simple modification of self attention that constrains attention to capture only information orthogonal to the token's own value vector (thus excluding information of self position), encouraging better context modeling, improving Transformer's sequence modeling performance.
+Now concatenate both $Y_1$ and $Y_2$ head-wise in the same interleaving manner
 
-Let's see what it looks like in code.
+$$C = \text{Concat}(Y_1, Y_2)$$
 
-```python
-# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+$$Y = \text{RMSNorm}(C)$$
 
-# XSA mode
-# https://arxiv.org/pdf/2603.09078
-vn = torch.nn.functional.normalize(v, dim=-1)
-z = y - (y * vn).sum(dim=-1, keepdim=True) * vn
+This concatenates our heads from $[H_1, H_3, H_5, H_7, ..., H_{n-3}, H_{n-1}]$, $[H_2, H_4, H_6, H_8, ..., H_{n-2}, H_n]$ back to $[H_1, H_2, H_3, H_4, H_5, H_6, H_7, H_8, ..., H_{n-3}, H_{n-2} H_{n-1}, H_n]$ then applies $\text{RMSNorm}$ to normalize.
 
-# re-assemble all head outputs side by side
-out = z.transpose(1, 2).contiguous().view(B, T, -1)
+### 4.4. Silu in Attention (Silia)
+We will use our new __Hydra Latent Attention__ mechanism which reduces the $\text{KV}$ cache along with memory & compute cost. This change was made compared to the original version of Silia which used the standard Multi-Head Attention because an open reviewer pointed out that due to MHA, Silia's memory and compute cost would increase by 2.5x despite the parameter savings, because in Silia we use the attention layer twice in a single block compared to a standard Transformer block where the attention layer was used only once per block.
 
-# output projection
-return self.out(out)
-```
+First we'll calculate attention over our hidden state $X$ where $X \in R^{b \times t \times d}$
 
-#### 4.2.5. Exclusive Gated Attention (XGA)
-Combining both Gated Attention and Exclusive Self Attention we get Exclusive Gated Attention.
+$$O = \text{HLA}(X)$$
 
-$$Q = XW_Q, K=XW_K, V=XW_V, G=XW_G$$
+$$u = OW_u, v = OW_v \tag{1}$$
 
-$$A = \mathrm{softmax} \left(\frac{QK^\top}{\sqrt{d_k}} + M\right)V$$
-
-$$O = \text{A} \odot \sigma(G)$$
-
-$$Y = \text{XSA}(O)$$
-
-_Exclusive Gated Attention_ brings the best of both worlds.
-
-Let's see what _XGA_ looks like in code (including RoPE and QK-Norm).
-
-```python
-B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-
-# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-q, k, v, g = self.qkv(x).view(B, T, self.n_head, -1).chunk(4, dim=-1)
-
-# apply rotary embeddings to queries and keys to get relative positional encoding
-cos, sin = cos_sin
-q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
-q, k = norm(q), norm(k) # QK norm
-
-# make head be batch dim, i.e. (B, T, nh, hs) -> (B, nh, T, hs)
-q, k, v, g = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), g.transpose(1, 2)
-
-# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
-
-# apply gated attention
-# https://arxiv.org/pdf/2505.06708
-y = y * F.sigmoid(g)
-
-# XSA mode
-# https://arxiv.org/pdf/2603.09078
-vn = torch.nn.functional.normalize(v, dim=-1)
-y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
-
-# re-assemble all head outputs side by side
-return y.transpose(1, 2).contiguous().view(B, T, -1)
-```
-
-#### 4.2.6. Silia
-Now as we've been through both SwiGLU and Attention, let's get into the mathematics of **Silia**. We will use our new __Exclusive Gated Attention__ mechanism. We will refer to it as $XGA$ in our mathematical formulation which will take our hidden state $X$ as an input.
-
-Now, first we'll calculate attention over the hidden state $X$.
-
-$$O = \text{XGA}(\text{RMSNorm}(X))$$
-
-$$U = OW_U, V = OW_V \tag{1}$$
+Where $W_u \in R^{(d \times h) \times d_o}$, $W_v \in R^{(d \times h) \times d_o}$
 
 Now on the 2 outputs $U$ and $V$, we will apply the $\text{SiLU}$ activation function.
 
-$$H = U \odot \text{SiLU}(V) \tag{2}$$
+$$H = \text{SiLU}(u) \odot v \tag{2}$$
 
-Now in equation $(2)$ we have a non-linear transformation of our hidden state $X$ processed with $XGA$. Now we will pass equation $(2)$ into $XGA$.
+Where $H \in R^{b \times t \times d_o}$
 
-$$Y = X + \mathrm{XGA}(H)W_O$$
+Now in equation $(2)$ we have a non-linear transformation of our hidden state $X$ processed with $HLA$. Now we will pass equation $(2)$ into $HLA$.
 
-After passing equation $(2)$ into $XGA$ we take a dot-product of it with an output projection matrix $W_O$ and add our original hidden state $X$ for create a residual connection to ensure rich gradients in deep neural networks similar to Transformer.
+$$Y = X + \mathrm{HLA}(H)W_O$$
 
-And here we go, we have our new **Silia** feedforward network!
+Where $W_O \in R^{(d \times h) \times d}$ and $Y \in R^{b \times t \times d}$
 
-### 4.3. The Intuition
-Why do I think replacing linear layers in SwiGLU Feedforward Network with Attention is a good idea?
+After passing equation $(2)$ into $HLA$ we take a dot-product of it with an output projection matrix $W_O$ and add our original hidden state $X$ for create a residual connection to ensure rich gradients in deep neural networks similar to Transformer.
 
-Attention as we know is mostly a linear transformation over our hidden state but it isn't simple, regular transformation like Feedforward network. We can think of attention as "smart" linear transformation. Such a linear transformation which tells us relevancy of every token, especially at longer sequence lengths. However the attention mechanism lacks a "strong" non-linearity. Attention does use the _softmax_ activation function which is a non-linear activation function but _softmax_ only decides which token attend to which other tokens. This makes _softmax_ a not so "strong" activation function.
+### 4.5. The Intuition
+Why do I think replacing linear layers in SwiGLU Feed-forward Network with Attention is a good idea?
 
-SwiGLU feedforward network however does have a strong activation function which is the _silu_ activation, in-fact at small scales (less parameters and smaller context windows) feedforward networks such as SwiGLU can approximate exactly what attention does with high accuracy, and this does make sense after all feedforward networks are _universal function approximators_. However as the model parameters and the context length scales feedforward networks get worse at approximating the attention mechanism which results in worse performance compared to Transformer.
+Attention as we know is mostly a linear transformation over our hidden state but it isn't simple, regular transformation like Feed-Forward network. We can think of attention as "smart" linear transformation. Such a linear transformation which tells us relevancy of every token, especially at longer sequence lengths. However the attention mechanism lacks a "strong" non-linearity. Attention does use the _softmax_ activation function which is a non-linear activation function but _softmax_ only decides which token attend to which other tokens. This makes _softmax_ a not so "strong" activation function.
 
-This is what **Silia** is about. Introducing a new class of feedforward networks which use attention mechanism for transforming our input and hidden states linearly and using activation functions like _silu_ for transforming that information non-linearly. Instead of running both separately and wasting parameters on overlapping functionality, Silia replaces the static linear matrices in SwiGLU with attention getting dynamic mixing and strong non-linearity in one unified operation.
+SwiGLU feed-forward network however does have a strong activation function which is the _silu_ activation, in-fact at small scales (less parameters and smaller context windows) feed-forward networks such as SwiGLU can approximate exactly what attention does with high accuracy, and this does make sense after all feed-forward networks are _universal function approximators_. However as the model parameters and the context length scales feed-forward networks get worse at approximating the attention mechanism which results in worse performance compared to Transformer.
 
-### 4.4. The Cost
-Merging Attention and SwiGLU together into a single operation unit does make the model parameter efficient however it comes at some cost.
-
-One open reviewer pointed out that in standard Transformer since both Attention and FFN are separate, they both have residual connections which improves training with richer gradients for deep neural networks but Silia has only one residual connection per layer. This means that deep Silia networks might underperform compared to deep Transformer networks.
-
-Another open reviewer pointed out that the attention computational cost might increase by 2.5x and the attention memory cost by 2x.
-
-This is backed by a very simple calculation.
-
-Let:
-- batch size = 8
-- number of heads = 16
-- context window = 1024
-
-| Per layer                | Transformer               | Silia                             |
-| ------------------------ | ------------------------- | --------------------------------- |
-| Number of elements       | $8 \cdot 16 \cdot 1024^2$ | $8 \cdot 16 \cdot 1024^2 \cdot 2$ |
-| VRAM usage (FP32, Bytes) | $536870912$               | $1073741824$                      |
-| VRAM usage (FP32, GB)    | ~ $0.53$                  | ~ $1.07$                          |
-
-To mitigate this issue we can use Sliding Window Attention or DeepSeek's Compressed Sparse Attention mechanism which would dramatically reduce compute and memory usage while preserving much of the original performance allowing for scaling model parameters and context window as usual.
+This is what **Silia** is about. Introducing a new class of feed-forward networks which use attention mechanism for transforming our input and hidden states linearly and using activation functions like _silu_ for transforming that information non-linearly. Instead of running both separately and wasting parameters on overlapping functionality, Silia replaces the static linear matrices in SwiGLU with attention getting dynamic mixing and strong non-linearity in one unified operation.
 
 
-## 5. Experiments
+## 5. Parameter Analysis
+### 5.1. Parameters Per Layer In Transformers
+In a traditional Transformer the Attention layer has $W_Q$, $W_K$, $W_V$ and $W_O$ matrices, and SwiGLU has $W_u$, $W_v$ and $W_o$ matrices.
+
+Where,
+
+$W_Q \in R^{c \times (d \times h)}$, $W_K \in R^{c \times (d \times h)}$, $W_V \in R^{c \times (d \times h)}$, $W_O \in R^{(d \times h) \times c}$, $W_u \in R^{c \times (4 \times c)}$, $W_v \in R^{c \times (4 \times c)}$, $W_o \in R^{(4 \times c) \times c}$ and $d = \frac{c}{h}$.
+
+Adding all Attention layer shapes,
+
+$$c*(3 \cdot h \cdot d) + (h \cdot d) \cdot c = 4 \cdot c^2 \tag{1}$$
+
+Now add all SwiGLU layer shapes,
+
+$$c \cdot (2 \cdot 4 \cdot c) + (4 \cdot c) \cdot c = 3 \cdot 4 \cdot c^2 \tag{2}$$
+
+Now add equation $(1)$ and $(2)$ together,
+
+$$4 \cdot c^2 + 3 \cdot 4 \cdot c^2 = (4 \cdot c)^2 = 16 \cdot c^2$$
+
+So we have a total of $16 \cdot c^2$ parameters per layer in a traditional Transformer.
+
+### 5.2. Parameters Per Layer In Silia
+Unlike Transformer in Silia we merge both Attention and SwiGLU FFN together as discussed above. In Silia we have $W_{Q↓}$, $W_{K↓}$, $W_{V↓}$, $W_{Q↑}$, $W_{K↑}$, $W_{V↑}$, $W_G$, $W_u$, $W_v$ and $W_O$.
+
+Where,
+
+$W_{Q↓} \in R^{d_i \times d}$, $W_{K↓} \in R^{d_i \times d}$ and $W_{V↓} \in R^{d_i \times d}$, $W_{Q↑} \in R^{d \times (d \times h)}$, $W_{K↑} \in R^{d \times (d \times h)}$, $W_{V↑} \in R^{d \times (d \times h)}$, $W_G \in R^{d_i \times (d \times \frac{h}{2})}$, $W_u \in R^{(d \times h) \times d_o}$, $W_v \in R^{(d \times h) \times d_o}$ and $W_O \in R^{(d \times h) \times d}$
+
+Adding all shapes we get,
+
+$$[\frac{h}{2}d^2 + d^2 + 8 \cdot h \cdot d^2] + [(2 \cdot h \cdot d^2 + 4 \cdot d^2 + h \cdot d^2)] + 6 \cdot h \cdot d^2 = [5 + \frac{35}{2} \cdot h] \cdot d^2$$
+
+For simplicity let's switch $\frac{35}{2}$ with $\frac{36}{2}=18$,
+
+$$[5 + \frac{36}{2} \cdot h] \cdot d^2 = [5 + 18 \cdot h] \cdot d^2$$
+
+So we have a total of $[5 + 18 \cdot h] \cdot d^2$ parameters per layer in Silia.
+
+### 5.3. Comparing Parameters Per Layer In Silia & Transformer
+Even though it's clear from the above mathematics that the number of parameters per layer in Silia is less than that of the Transformer, we'll still use inequality to prove the same mathematically.
+
+$$[5 + 18 \cdot h] \cdot d^2 < 16 \cdot c^2$$
+
+$$\because d = \frac{c}{h} \implies c = d \cdot h$$
+
+$$[5 + 18 \cdot h] \cdot d^2 < 16 \cdot (d \cdot h)^2$$
+
+$$[5 + 18 \cdot h] \cdot d^2 < 16 \cdot d^2 \cdot h^2$$
+
+$$5 + 18 \cdot h < 16 \cdot h^2$$
+
+This can be rearranged into a quadratic equation,
+
+$$16 \cdot h^2 - 18 \cdot h - 5 > 0$$
+
+Upon solving the quadratic equation we get range for $h$,
+
+$$h < −0.2396$$
+
+$$h > 1.3021​$$
+
+Since $h$ is always a positive integer we can discard and round $1.3021​$ to $2$ resulting in a simple logic that as long as the number of attention heads ($h$) is greater than or equals to $2$ ($h \geq 2$), the number of parameters per layer in Silia will be less than the same of the Transformer.
+
+
+## 6. Experiments
 The idea and intuition is quite simple but it works surprisingly well at tiny scale (≤ 5M parameters) and is able to achieve comparable loss and generation quality to Andrej Karpathy's nanoGPT (with RoPE and SwiGLU) architecture.
 
 I trained 3 different regex+BPE tokenizer based on OpenAI-o200k_base regex pattern.
@@ -259,7 +289,7 @@ The first 3 experiments were done with the exact same following settings:
 | Total parameters (in millions)         | 0.78  | 4.19    |
 | Non-embedding parameters (in millions) | 0.26  | 2.09    |
 
-### 5.1. Business Email Generation
+### 6.1. Business Email Generation
 Inspired from [Experiment: How far can a 28M model go in business email generation?](https://www.reddit.com/r/LocalLLaMA/comments/1ryq2lg/experiment_how_far_can_a_28m_model_go_in_business/) I trained a business email generation model on [Kamisori-daijin/email-datasets-20k](https://huggingface.co/datasets/Kamisori-daijin/email-datasets-20k) on Hugging Face. There are 20,000 samples of emails and was created using **Gemma 3-4B-it** (via mlx-community/gemma-3-4b-it-4bit-DWQ).
 
 Post-tokenization the dataset had 5.51M tokens, with 80/20 rule I divided it into 4.40M training tokens and 1.10M validation tokens. Both models were trained on 8.2 epochs.
@@ -306,7 +336,7 @@ Junior Developer
 
 It is still inconsistent but occasionally gets close.
 
-### 5.2. WebText Generation
+### 6.2. WebText Generation
 Trained on my custom [Srijan-Srivastava/super-tiny-webtext](https://huggingface.co/datasets/Srijan-Srivastava/webtext-super-tiny) dataset on Hugging Face. There are 1447 samples and was created by scrapping and cleaning very specific webpages on various topics.
 
 This dataset contain texts from Wikipedia (on various topics, personalities, games, movies, companies and more), fandoms, storylines, scrips and story dialogues of various games (such as GTA, RDR, Last of Us, Mafia, Cyberpunk 2077 and more), transcripts of some YouTube videos, several research papers, academic articles and blogs (mainly revolving around AI and LLMs in general) and code from some of my personal code bases and other public repositories such as the Hazel Game Engine repository on GitHub. I tried my best to keep the programming languages limited to just Python, C#, C++ and JavaScript in the dataset. All of this made ~30M characters in total.
@@ -326,7 +356,7 @@ Here's one sample output:
 Steve Jobs made the soul of Apple and he had a run with Pixar on the company later in a decade I was transported in June 2011, but h e made Jobs was a school case that the company had been accessible to his chairman to fill me named Steve Jobs and Jobs, in the com pany and encounters a $10.5 million in 2022 demanded Apple studio to Apple. In 2023, Jobs announced OpenAI's announcement of the fil m, "Skaxicly that he looks changing the company of the musician, the Macintosh coding virtual businesses but he stated that he wasbl ished for their share of other company. Thing the first Pixar Low and film received a greater of Marvel Studios in US$1.5 million so ld to the board of directors in the late 2011, and the previous release was officially based on funding for the film for launching t he most of the Year. The company's "Didau 16.5 million for the effort to make it a company to frames the company of the Solution, an d having a more access to the company of Apple II. [216] The Wall, Thain,
 ```
 
-### 5.3. ChatAlpaca Generation
+### 6.3. ChatAlpaca Generation
 Trained on [ChatAlpaca: A Multi-Turn Dialogue Corpus based on Alpaca Instructions](https://github.com/icip-cas/ChatAlpaca) dataset on Hugging Face. There are 20,000 samples and was created using **GPT-3.5-turbo** to generate follow-up utterances and continue the conversation with ChatGPT. This process results in multi-turn conversations where the simulated user provides instructions and ChatGPT responds accordingly.
 
 Post-tokenization the dataset had ~18M tokens, with 80/20 rule I divided it into ~14.4M training tokens and ~3.6M validation tokens. Both models were trained on 2.8 epochs.
@@ -347,16 +377,16 @@ AI-powered speech recognition technology that indicate sound quality and meaning
 ```
 
 
-## 6. Conclusion
-### 6.1. Use Cases
+## 7. Conclusion
+### 7.1. Use Cases
 1. It can be used as super-light-weight, attention-powered, on-device task-specific models for Smart Watches, old Mobile Phones and several generations old computers.
 2. It can be used as on-device models to immediately generate one-linear captions/titles, dialogues for NPCs in video games for increased immersion and more.
 3. It can be also be used for simple & fast image/text/topic classification, sentiment/emotion analysis, intent/toxicity detection and more.
 
-### 6.2. Limitations
+### 7.2. Limitations
 Silia trains successfully at 100M parameters but whether it'll break at scales beyond 100M parameters is still a thing to be tested.
 
-### 6.3. Closing Thoughts
+### 7.3. Closing Thoughts
 Silia is a small idea for small scale. The sub-10M parameter space is underexplored and for good reasons, there isn't much glory in it. But I think there's some genuine value in asking whether the standard Transformer block is the right design when you only have a few hundred thousand parameters to spare. Merging attention and SwiGLU into a single unified operation isn't a revolutionary idea, but the parameter savings are real and the results are encouraging enough to be worth sharing. I hope this paper is useful to someone working in the same constrained corner of the field that I am.
 
 
