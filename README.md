@@ -58,7 +58,7 @@ Tesla M60 and H100 were made available thanks to the paper sponsor Tomi Yang.
 
 
 ## 4. Model Architecture
-<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:80%;">
+<img src="img/arch.png" alt="youforgeta1000thingseverydaymakesurethisisoneofthem" style="width:100%;">
 
 Merging Attention and SwiGLU was inspired from 2 core ideas.
 
