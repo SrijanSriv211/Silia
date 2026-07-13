@@ -158,7 +158,7 @@ Where $W_O \in R^{(d \times h) \times d}$ and $Y \in R^{b \times t \times d}$
 
 After passing equation $(2)$ into $HLA$ we take a dot-product of it with an output projection matrix $W_O$ and add our original hidden state $X$ for create a residual connection to ensure rich gradients in deep neural networks similar to Transformer.
 
-## 2. Why Silia
+## 3. Why Silia
 Why do I think replacing linear layers in SwiGLU Feed-forward Network with Attention is a good idea?
 
 Attention as we know is mostly a linear transformation over our hidden state but it isn't simple, regular transformation like Feed-Forward network. We can think of attention as "smart" linear transformation. Such a linear transformation which tells us relevancy of every token, especially at longer sequence lengths. However the attention mechanism lacks a "strong" non-linearity. Attention does use the _softmax_ activation function which is a non-linear activation function but _softmax_ only decides which token attend to which other tokens. This makes _softmax_ a not so "strong" activation function.
@@ -230,7 +230,7 @@ $$h < −0.2396$$
 
 $$h > 1.3021​$$
 
-Since $h$ is always a positive integer we can discard and round $1.3021​$ to $2$ resulting in a simple logic that as long as the number of attention heads ($h$) is greater than or equals to $2$ ($h \geq 2$), the number of parameters per layer in Silia will be less than the same of the Transformer.
+Since $h$ is always a positive integer we can discard $-0.2396$ and round $1.3021​$ to $2$ resulting in a simple logic that states: as long as the number of attention heads ($h$) is greater than or equals to $2$ ($h \geq 2$), the number of parameters per layer in Silia will be less than the same of the Transformer.
 
 
 ## 5. Training
