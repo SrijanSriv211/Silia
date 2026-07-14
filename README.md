@@ -235,9 +235,7 @@ Since $h$ is always a positive integer we can discard $-0.2396$ and round $1.302
 
 ## 5. Training
 ### 5.1. Training Data
-I trained on Fineweb-edu dataset consisting of about 100M tokens. All the tokens were encoded using byte-pair encoding, which has a shared source-target vocabulary of 8192 token.
-
-For tasks such as memorization, creative writing, math exercise and more I used Synth dataset 100M tokens. This dataset contains approximately 80% English with multilingual content in Spanish, German, French, Polish, Italian, Dutch, Latin and more. All tokens in this dataset were encoded by a separate byte-pair encoder of vocabulary of 8192 tokens.
+I trained on a mix of Fineweb-edu and Synth dataset consisting of about 200M tokens. All the tokens were encoded using byte-pair encoding, which has a shared source-target vocabulary of 8192 token. This dataset contains approximately 80% English with multilingual content in Spanish, German, French, Polish, Italian, Dutch, Latin and more.
 
 ### 5.2. Hardware
 I trained my models on Google Colab and Kaggle's free tier Tesla T4 GPUs. For the base models using the hyperparameters described throughout the paper.
@@ -404,19 +402,23 @@ AI-powered speech recognition technology that indicate sound quality and meaning
 
 ## 7. Conclusion
 ### 7.1. Use Cases
-1. It can be used as super-light-weight, attention-powered, on-device task-specific models for Smart Watches, old Mobile Phones and several generations old computers.
-2. It can be used as on-device models to immediately generate one-linear captions/titles, dialogues for NPCs in video games for increased immersion and more.
-3. It can be also be used for simple & fast image/text/topic classification, sentiment/emotion analysis, intent/toxicity detection and more.
+1. It can be used as light-weight, attention-powered, on-device task-specific models for televisions, smart refrigerators, smart car screens, smart watches, old mobile phones and computers.
+2. It can be used as on-device models to immediately generate one-linear captions/titles for social media posts, dialogues for non-playable characters in video games.
+3. It can be also be used for simple & fast image/text/topic classification, sentiment/emotion analysis, intent/toxicity detection.
 
 ### 7.2. Limitations
-Silia trains successfully at 100M parameters but whether it'll break at scales beyond 100M parameters is still a thing to be tested.
+The embedding dimension and head dimension are tied together meaning that scaling up the architecture by width becomes increasingly challenging compared to traditional transformer since to scale up the width you'd need to scale up either the number of heads or the embedding/head dimension.
+
+A more practical way to scale up the architecture would be to make the model deeper which unfortunately would make both training and inference slower since there would be more layers that'll waiting for the previous layer to finish their computation.
+
+For small models which only require a couple of heads, scaling embedding/head dimension to 128-256 isn't much of an issue if you can bare the resulted increase in compute and memory requirements, but for larger models up to 100M parameters or more, scaling heads or head dimension wouldn't be enough so scaling depth will be need as well. This implies that as this architecture is scaled up in it's raw form, the increase compute and memory requirements would quickly lead it to lose all it's parameter savings and other advantages against the standard transformer.
 
 ### 7.3. Closing Thoughts
-Silia is a small idea for small scale. The sub-10M parameter space is underexplored and for good reasons, there isn't much glory in it. But I think there's some genuine value in asking whether the standard Transformer block is the right design when you only have a few hundred thousand parameters to spare. Merging attention and SwiGLU into a single unified operation isn't a revolutionary idea, but the parameter savings are real and the results are encouraging enough to be worth sharing. I hope this paper is useful to someone working in the same constrained corner of the field that I am.
+Silia is a small idea for small scale. The sub-10M parameter space is under explored and for good reasons, there isn't much glory in it. But I think there's some genuine value in asking whether the standard Transformer block is the right design when you only have a few hundred thousand parameters to spare. Merging attention and SwiGLU into a single unified operation isn't a revolutionary idea, but the parameter savings are real and the results are encouraging enough to be worth sharing. I hope this paper is useful to someone working in the same constrained corner of the field that I am.
 
 
 ## Acknowledgements
-This work used compute (for models with 10 million parameters and beyond) sponsored by Tomi Yang. I also thank Tomi Yang for all the helpful discussions!
+This work used compute from Google Colab and Kaggle free tier GPUs.
 
 
 ## References
