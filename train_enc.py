@@ -18,10 +18,12 @@ elif dataset_path.endswith(".json"):
 	with open(dataset_path, "r", encoding="utf-8") as f:
 		o = json.load(f)
 		text = "\n".join(o) + "\n"
+		del o
 
 elif dataset_path.endswith(".parquet"):
 	df = pd.read_parquet(dataset_path)
 	text = df["text"].tolist()
+	del df
 	text = "\n".join(text) + "\n"
 
 else:

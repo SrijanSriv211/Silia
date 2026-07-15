@@ -16,6 +16,7 @@ data = []
 
 df = pd.read_parquet(dataset_path)
 data = df["text"].tolist()
+del df
 
 if seq_len is not None:
 	data = [
