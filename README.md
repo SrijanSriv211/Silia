@@ -235,7 +235,7 @@ Since $h$ is always a positive integer we can discard $-0.2396$ and round $1.302
 
 ## 5. Training
 ### 5.1. Training Data
-I trained on a mix of Fineweb-edu, Finewiki and Synth dataset consisting of about 300M tokens in total. All the tokens were encoded using byte-pair encoding, which has a shared source-target vocabulary of 8192 token.
+I trained on a mix of Fineweb-edu, Finewiki and Synth dataset consisting of about ~350M tokens in total. All the tokens were encoded using byte-pair encoding, which has a shared source-target vocabulary of 8192 token.
 
 ### 5.2. Hardware
 I trained my models on Google Colab and Kaggle's free tier Tesla T4 GPUs. For the base models using the hyperparameters described throughout the paper.
