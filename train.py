@@ -8,7 +8,6 @@ from optimizer import MuonDist, Muon
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from colorama import Style, Fore, init
-from contextlib import nullcontext
 from rich.progress import track
 from itertools import chain
 
@@ -117,8 +116,7 @@ def estimate_loss(model, next_batch, device):
 			description=f"{Fore.WHITE}{Style.BRIGHT}calc {Fore.WHITE}{Style.DIM}{split} loss{Style.RESET_ALL}"
 		):
 			X, Y = next_batch(split, device)
-			with ctx:
-				_, loss = model(X, Y)
+			_, loss = model(X, Y)
 			losses[k] = loss.item()
 		out[split] = losses.mean()
 	model.train()
@@ -132,7 +130,7 @@ ansi_escape = regex.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 CONFIG = json.loads(open(sys.argv[1], "r", encoding="utf-8").read()) if len(sys.argv) > 1 else {
 	"dataset": {
 		"data_division": 0.8,
-		"is_file": True,
+		"load_from_file": True,
 		"path": "data/webtext.bin"
 	},
 	"checkpoints": {
@@ -202,11 +200,6 @@ log_path = CONFIG["checkpoints"]["path"]
 device_type = "cuda" if torch.cuda.is_available() and sys.argv[2] == "cuda" else "cpu"
 init_from = CONFIG["init_from"][11:].strip("/") if CONFIG["init_from"].startswith("pretrained,") else "scratch"
 init_seed_offset = random.randint(18, 2007) if CONFIG["init_from"].startswith("pretrained,") else 0
-# "float32", "bfloat16", or "float16", the latter will auto implement a GradScaler
-dtype = "bfloat16" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else "float16"
-# note: float16 data type will automatically use a GradScaler
-ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
-ctx = nullcontext() if device_type == "cpu" else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 # init seed
 if CONFIG["seed"] != "auto":
@@ -284,9 +277,6 @@ if optimizer_checkpoint is not None:
 	for o, s in zip(optimizers, optimizer_checkpoint["model"]):
 		o.load_state_dict(s)
 
-# initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.amp.GradScaler()
-
 # load encoder
 enc = Encoder()
 enc.load(CONFIG["encoder_path"])
@@ -295,7 +285,7 @@ enc.load(CONFIG["encoder_path"])
 dataset = dataloader(
 	CONFIG["dataset"]["path"],
 	hyperparams["block_size"], CONFIG["batch_size"], enc.special_tokens["<|actor|>"],
-	CONFIG["dataset"]["data_division"], CONFIG["dataset"]["is_file"]
+	CONFIG["dataset"]["data_division"], CONFIG["dataset"]["load_from_file"]
 )
 n_train_toks, n_val_toks = dataset.load_dataset()
 
@@ -377,15 +367,10 @@ for _ in range(n_steps):
 		# looking at the source of that context manager, it just toggles this variable
 		if ddp:
 			model.require_backward_grad_sync = (micro_step == CONFIG["gradient_accumulation_steps"] - 1)
-
-		with ctx:
-			_, loss = model(X, Y)
-			# scale the loss to account for gradient accumulation
-			loss = loss / CONFIG["gradient_accumulation_steps"]
-		# loss.backward() # backward pass
-		scaler.scale(loss).backward()
-	for o in optimizers:
-		scaler.unscale_(o)
+		_, loss = model(X, Y)
+		# scale the loss to account for gradient accumulation
+		loss = loss / CONFIG["gradient_accumulation_steps"]
+		loss.backward() # backward pass
 	torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
 	for group in optimizers[1].param_groups:
@@ -394,8 +379,7 @@ for _ in range(n_steps):
 
 	## step the optimizers
 	for o in optimizers:
-		scaler.step(o)
-		scaler.update()
+		o.step()
 
 	## flush the gradients as soon as we can, no need for this memory anymore
 	optimizers[0].zero_grad(set_to_none=True)
