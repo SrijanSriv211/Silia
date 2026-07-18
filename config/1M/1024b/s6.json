@@ -12,8 +12,8 @@
 	"model_hyperparams": {
 		"vocab_size": 8192,
 		"block_size": 1024,
-		"n_layer": 5,
-		"n_head": 3,
+		"n_layer": 4,
+		"n_head": 4,
 		"n_embd": 64,
 		"d_model": 256
 	},
@@ -30,17 +30,17 @@
 	"seed": 18,
 
 	"batch_size": 16,
-	"gradient_accumulation_steps": 1,
+	"gradient_accumulation_steps": 4,
 
 	"eval_iters": 200,
-	"max_iters": 20000,
+	"max_iters": 17000,
 	"log_interval": 200,
 	"eval_interval": 2000,
 
 	"decay_lr": true,
-	"warmup_iters": 1000,
-	"cooldown_frac": 0.2,
+	"warmup_iters": 850,
+	"cooldown_frac": 0.1,
 	"learning_rate": 3e-3,
-	"lr_decay_iters": 20000,
+	"lr_decay_iters": 17000,
 	"min_learning_rate": 3e-4
 }

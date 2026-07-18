@@ -30,17 +30,17 @@
 	"seed": 18,
 
 	"batch_size": 16,
-	"gradient_accumulation_steps": 1,
+	"gradient_accumulation_steps": 4,
 
 	"eval_iters": 200,
-	"max_iters": 20000,
+	"max_iters": 30000,
 	"log_interval": 200,
 	"eval_interval": 2000,
 
 	"decay_lr": true,
-	"warmup_iters": 1000,
+	"warmup_iters": 1500,
 	"cooldown_frac": 0.2,
 	"learning_rate": 8e-4,
-	"lr_decay_iters": 20000,
+	"lr_decay_iters": 30000,
 	"min_learning_rate": 8e-5
 }
