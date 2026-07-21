@@ -235,28 +235,28 @@ Since $h$ is always a positive integer we can discard $-0.2396$ and round $1.302
 
 ## 5. Training
 ### 5.1. Training Data
-I trained on a mix of Fineweb-edu, Finewiki and Synth dataset consisting of about ~350M tokens in total. All the tokens were encoded using byte-pair encoding, which has a shared source-target vocabulary of 8192 token.
+I trained on a Fineweb-edu dataset consisting of about ~350M characters. All the characters were encoded using byte-pair encoding, which has a shared source-target vocabulary of 512 token. The dataset after tokenization contained ~275M tokens.
 
 ### 5.2. Hardware
-I trained my models on Google Colab and Kaggle's free tier Tesla T4 GPUs. For the base models using the hyperparameters described throughout the paper.
+I trained the base model on Google Colab Tesla T4 GPU for ~1.5 hours using the hyperparameter described throughout the paper.
 
 ### 5.3. Optimizer
-The AdamW optimizer with ${\beta}_1 = 0.9$, ${\beta}_2 = 0.98$ and $\epsilon = 10^{−9}$ was used to train the embedding layers, while the Muon optimizer with $\mu = 95$ was used to train rest of the non-embedding layers.
+The AdamW optimizer with ${\beta}_1 = 0.9$, ${\beta}_2 = 0.95$ and $\epsilon = 10^{−8}$ was used to train the embedding layers, while the Muon optimizer with $\mu = 95$ was used to train rest of the non-embedding layers.
 
 The learning rate over the course of training, according to the formula:
 
 $$
 \eta(t)=
 \begin{cases}
-\eta_0, & \text{if learning-rate decay is disabled},\\[6pt]
+\eta_{\max}, & \text{if learning-rate decay is disabled},\\[6pt]
 \displaystyle
-\eta_0\frac{t+1}{T_w+1},
+\eta_{\max}\frac{t+1}{T_w+1},
 & 0\le t<T_w,\\[10pt]
-\eta_0,
+\eta_{\max},
 & T_w\le t\le T_c,\\[8pt]
 \displaystyle
 \eta_{\min}
-+\frac{\eta_0-\eta_{\min}}{2}
++\frac{\eta_{\max}-\eta_{\min}}{2}
 \left[
 1+\cos\!\left(
 \pi\frac{t-T_c}{T_d-T_c}
@@ -273,7 +273,7 @@ where,
 $$
 \begin{aligned}
 t &:\ \text{training iteration},\\
-\eta_0 &:\ \text{initial learning rate},\\
+\eta_{\max} &:\ \text{initial learning rate},\\
 \eta_{\min} &:\ \text{minimum learning rate},\\
 T_w &:\ \text{number of warmup iterations},\\
 T_d &:\ \text{total learning-rate decay iterations},\\
@@ -286,118 +286,17 @@ This corresponds to increasing the learning rate linearly for the first $T_w$ tr
 
 
 ## 6. Results
-The idea and intuition is quite simple but it works surprisingly well at tiny scale (≤ 5M parameters) and is able to achieve comparable loss and generation quality to Andrej Karpathy's nanoGPT (with RoPE and SwiGLU) architecture.
 
-I trained 3 different regex+BPE tokenizer based on OpenAI-o200k_base regex pattern.
+|             | Non-Embedding Parameters | Vocab Size | Context Length | Layers | $d_{model}$ | $d_{head}$ | $d_{ff}$ | $h$ |
+| ----------- | ------------------------ | ---------- | -------------- | ------ | ----------- | ---------- | -------- | --- |
+| **Silia**   | 491904                   | 512        | 1024           | 3      | 64          | 64         | 256      | 2   |
+| **nanoGPT** | 524288                   | 512        | 1024           | 2      | 128         | 64         | 256      | 2   |
 
-| Dataset            | Vocabulary size | Tokenizer name |
-| ------------------ | --------------- | -------------- |
-| Super Tiny WebText | 8192            | cl8k           |
-| Fineweb-edu-100M   | 12288           | o12k           |
-| Synth-100M         | 16384           | cl16k          |
+Both models were trained with the following settings:
 
-The first 3 experiments were done with the exact same following settings:
-
-| Hyperparameters                        | Silia | nanoGPT |
-| -------------------------------------- | ----- | ------- |
-| Context length                         | 256   | 256     |
-| Number of layers                       | 2     | 2       |
-| Number of heads                        | 4     | 4       |
-| Head dimension                         | N/A   | 64      |
-| Embedding size                         | 64    | 256     |
-| Batch size                             | 16    | 16      |
-| Max iterations                         | 10k   | 10k     |
-| Max learning rate                      | 3e-3  | 3e-3    |
-| Min learning rate                      | 3e-4  | 3e-4    |
-| Total parameters (in millions)         | 0.78  | 4.19    |
-| Non-embedding parameters (in millions) | 0.26  | 2.09    |
-
-### 6.1. Business Email Generation
-Inspired from [Experiment: How far can a 28M model go in business email generation?](https://www.reddit.com/r/LocalLLaMA/comments/1ryq2lg/experiment_how_far_can_a_28m_model_go_in_business/) I trained a business email generation model on [Kamisori-daijin/email-datasets-20k](https://huggingface.co/datasets/Kamisori-daijin/email-datasets-20k) on Hugging Face. There are 20,000 samples of emails and was created using **Gemma 3-4B-it** (via mlx-community/gemma-3-4b-it-4bit-DWQ).
-
-Post-tokenization the dataset had 5.51M tokens, with 80/20 rule I divided it into 4.40M training tokens and 1.10M validation tokens. Both models were trained on 8.2 epochs.
-
-After training the final losses looked like this:
-
-| Loss       | Silia | nanoGPT |
-| ---------- | ----- | ------- |
-| Training   | 1.43  | 1.4     |
-| Validation | 1.48  | 1.44    |
-
-Here's one sample output:
-**Prompt: "`Write a polite refusal email<|eop|>`"**
-
-**From the ~28M parameter model**
-```
-I understand this is a Friday evening, but I'm happy to provide more information.  
-I’ll do my best to discuss the details and explore possible alternatives.
-
-We’ll keep you updated on our progress. Please let me know if this is something you’d be interested in.
-
-Best,
-[name]
-```
-
-**From my model**
-```
-Correcting Reason for Recent Experience
-Dear [Officer's Name],
-
-I hope this email finds you well.
-
-As you know, [Company Name] has recently received your experience with [Product Name], a hugely successful funding round, and we’re committed to providing you with the billing records and targeted a highly value of [Client Name].
-
-As you know, our rebranding initiative is currently undergoing a significant rebranding phase, and we want to sincerely apologize for the timing. We value your time and appreciate your understanding.
-
-We understand your concerns swiftly and want to assure you that we will be moving forward. Please let us know your availability.
-
-Sincerely,
-[Name]
-Junior Developer
-[Company Name]<|eot|>
-```
-
-It is still inconsistent but occasionally gets close.
-
-### 6.2. WebText Generation
-Trained on my custom [Srijan-Srivastava/super-tiny-webtext](https://huggingface.co/datasets/Srijan-Srivastava/webtext-super-tiny) dataset on Hugging Face. There are 1447 samples and was created by scrapping and cleaning very specific webpages on various topics.
-
-This dataset contain texts from Wikipedia (on various topics, personalities, games, movies, companies and more), fandoms, storylines, scrips and story dialogues of various games (such as GTA, RDR, Last of Us, Mafia, Cyberpunk 2077 and more), transcripts of some YouTube videos, several research papers, academic articles and blogs (mainly revolving around AI and LLMs in general) and code from some of my personal code bases and other public repositories such as the Hazel Game Engine repository on GitHub. I tried my best to keep the programming languages limited to just Python, C#, C++ and JavaScript in the dataset. All of this made ~30M characters in total.
-
-Post-tokenization the dataset had ~9M tokens, with 80/20 rule I divided it into ~7M training tokens and ~2M validation tokens. Both models were trained on 5.8 epochs.
-
-After training the final losses looked like this:
-
-| Loss       | Silia | nanoGPT |
-| ---------- | ----- | ------- |
-| Training   | 3.46  | 3.15    |
-| Validation | 3.85  | 3.44    |
-
-Here's one sample output:
-**Prompt: "`Steve Jobs made the soul of Apple`"**
-```
-Steve Jobs made the soul of Apple and he had a run with Pixar on the company later in a decade I was transported in June 2011, but h e made Jobs was a school case that the company had been accessible to his chairman to fill me named Steve Jobs and Jobs, in the com pany and encounters a $10.5 million in 2022 demanded Apple studio to Apple. In 2023, Jobs announced OpenAI's announcement of the fil m, "Skaxicly that he looks changing the company of the musician, the Macintosh coding virtual businesses but he stated that he wasbl ished for their share of other company. Thing the first Pixar Low and film received a greater of Marvel Studios in US$1.5 million so ld to the board of directors in the late 2011, and the previous release was officially based on funding for the film for launching t he most of the Year. The company's "Didau 16.5 million for the effort to make it a company to frames the company of the Solution, an d having a more access to the company of Apple II. [216] The Wall, Thain,
-```
-
-### 6.3. ChatAlpaca Generation
-Trained on [ChatAlpaca: A Multi-Turn Dialogue Corpus based on Alpaca Instructions](https://github.com/icip-cas/ChatAlpaca) dataset on Hugging Face. There are 20,000 samples and was created using **GPT-3.5-turbo** to generate follow-up utterances and continue the conversation with ChatGPT. This process results in multi-turn conversations where the simulated user provides instructions and ChatGPT responds accordingly.
-
-Post-tokenization the dataset had ~18M tokens, with 80/20 rule I divided it into ~14.4M training tokens and ~3.6M validation tokens. Both models were trained on 2.8 epochs.
-
-After training the final losses looked like this:
-
-| Loss       | Silia | nanoGPT |
-| ---------- | ----- | ------- |
-| Training   | 3.35  | 2.98    |
-| Validation | 3.4   | 3.41    |
-
-Here's one sample output:
-**Prompt: "`Describe the process of decision tree learning.<|eop|>`"**
-```
-Describe the process of decision tree learning.<|eop|>
-Decision tree learning is a supervised machine learning model that uses language, powers, and other machine learning can be used to perform datasets that handle no parsion. Additionally, it would include the test and visualization form of an AI language model. an
-AI-powered speech recognition technology that indicate sound quality and meaning. In this sentence, the neural networks, computers c an be used to identify whether the text, while both being used in text. It is more relevant, accurate and more accurate than text an imations or conversational animals and animals. G<|eot|>
-```
+| $t$    | $\eta_{max}$ | $\eta_{min}$ | $T_w$ | $T_d$  | $c$  | $T_c$  |
+| ------ | ------------ | ------------ | ----- | ------ | ---- | ------ |
+| 20,000 | 3e-3         | 3e-4         | 1000  | 20,000 | 0.45 | 11,000 |
 
 
 ## 7. Conclusion
@@ -418,7 +317,7 @@ Silia is a small idea for small scale. The sub-10M parameter space is under expl
 
 
 ## Acknowledgements
-This work used compute from Google Colab and Kaggle free tier GPUs.
+This work used compute from Google Colab.
 
 
 ## References
