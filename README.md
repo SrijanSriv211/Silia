@@ -6,11 +6,11 @@ Srivastavavsrijan321@gmail.com<br>
 QCoreNest@gmail.com
 </p>
 
-v2, July 2026
+v2, July 23, 2026
 
 
 ## Abstract
-Introduction of the Transformer neural network architecture in the famous `Attention Is All You Need` paper has created a huge wave of AI development in recent years. The scaled dot-product attention allows for information to be processed with higher efficiency and quality, which the previous RNN-based models lacked. However Transformer-based models comes with their own set of challenges, particularly with parameter efficiency for tiny scale models. At such tiny scale a Transformer model essentially uses more parameter than it really should. This regime is very under-explored and for good reasons however exploring it might allow us to discover interesting insights about the Transformer. So here-in this paper I am introducing Silia, a novel neural network architecture designed for efficient modelling & classification tasks under severe parameter budget. Training against Andrej Karpathy's nanoGPT, Silia achieves comparable loss and generation quality with significantly less parameters. Along with when a 117M parameters model even after being under-trained on a ~100M tokens of synthetic dataset, Silia achieves losses similar to what scaling loss predict for a Transformer based 117M parameters model trained on ~100M tokens.
+Introduction of the Transformer neural network architecture in the famous `Attention Is All You Need` paper has created a huge wave of AI development in recent years. The scaled dot-product attention allows for information to be processed with higher efficiency and quality, which the previous RNN-based models lacked. However Transformer-based models comes with their own set of challenges, particularly with parameter efficiency for tiny scale models. At such tiny scale a Transformer model essentially uses more parameter than it really should. This regime is very under-explored and for good reasons however exploring it might allow us to discover interesting insights about the Transformer. So here-in this paper I am introducing Silia, a novel neural network architecture designed for efficient modelling & classification tasks under severe parameter budget. Training on Fineweb-edu dataset shows very competitive performance on HellaSwag, PIQA and LAMBADA benchmarks, validation loss and generation quality to other models with equal or more parameters.
 
 
 ## 1. Introduction
@@ -297,6 +297,10 @@ This corresponds to increasing the learning rate linearly for the first $T_w$ tr
 
 ## 6. Results
 **Silia** was trained on Google Colab Tesla T4 GPU for ~1.5 hours of wall-clock time with the given training configurations in _Table 1_ and model hyperparameters in _Table 2_.
+
+<img src="img/benchmarks.png" alt="gpt-6-7isgonnabeagi" style="width:100%;">
+
+<img src="img/loss_curves.png" alt="gpt-6-7isgonnabeagi" style="width:100%;">
 
 | Model             | Parameters | Vocab Size | Context Length | Layers | $d_{ff}$ | $d_{model}$ | $d_{head}$ | $h_Q$, $h_{KV}$ |
 | ----------------- | ---------- | ---------- | -------------- | ------ | -------- | ----------- | ---------- | --------------- |
