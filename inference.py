@@ -4,7 +4,7 @@ from encoder import Encoder
 from colorama import Style, Fore, init
 import argparse, random, torch
 
-def generate(i, e, l=256, t=0.8, f=40, T=None, device="cpu"):
+def generate(i, e, l=256, t=0.8, f=None, T=None, device="cpu"):
 	# create an instance of Silia
 	conf = Config(**i["hyperparams"])
 	model = Silia(conf)
@@ -30,12 +30,12 @@ def generate(i, e, l=256, t=0.8, f=40, T=None, device="cpu"):
 	enc.load(e)
 
 	# encode text and generate output
-	out = []
 	enctxt = enc.encode(T, allowed_special="all") if T is not None else [random.randint(0, len(enc.vocab) + len(enc.special_tokens))]
-	for tok in model.generate(enctxt, max_new_tokens=l, device=device, temperature=t, top_k=f):
-		print(f"{Fore.WHITE}{Style.DIM}{enc.decode([tok])}", end="", flush=True)
-		out.append(tok)
-	print(enc.decode(out))
+	out = model.generate(
+		enctxt, max_new_tokens=l,
+		sink_tok=enc.special_tokens["<|actor|>"],
+		device=device, temperature=t, top_k=f
+	)[0].tolist()
 	return enc.decode(out)
 
 if __name__ == "__main__":
@@ -53,10 +53,11 @@ if __name__ == "__main__":
 	if args.text_prompt:
 		text = args.text_prompt
 		print(f"{Fore.WHITE}{Style.BRIGHT}> {text}")
-		generate(
-            torch.load(args.model, map_location=device),
-            args.encoder, args.length, args.temperature, args.top_k, text, device
-        )
+		out = generate(
+			torch.load(args.model, map_location=device),
+			args.encoder, args.length, args.temperature, args.top_k, text, device
+		)
+		print(f"{Fore.WHITE}{Style.DIM}{out}\n")
 
 	else:
 		while True:
@@ -68,7 +69,8 @@ if __name__ == "__main__":
 			elif text.strip() == "":
 				text = None
 
-			generate(
-                torch.load(args.model, map_location=device),
-                args.encoder, args.length, args.temperature, args.top_k, text, device
-            )
+			out = generate(
+				torch.load(args.model, map_location=device),
+				args.encoder, args.length, args.temperature, args.top_k, text, device
+			)
+			print(f"{Fore.WHITE}{Style.DIM}{out}\n")

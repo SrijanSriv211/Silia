@@ -1,5 +1,6 @@
 from colorama import init, Fore, Style
-import pickle, regex, json, time, os
+from collections import Counter
+import pickle, regex, json, time
 
 init(autoreset=True)
 
@@ -81,7 +82,7 @@ class Encoder:
 		self.inverse_special_tokens = {}
 		self.vocab = {idx: bytes([idx]) for idx in range(256)} # idx -> bytes
 
-	def train(self, text, vocab_size=256, text_range=10_000_000):
+	def train(self, text, vocab_size=256, chunk_range=100_000):
 		"""
 		- path: [name, is_dir]
 		- vocab_size: max number of merges to be made - 256 bytes
@@ -95,37 +96,28 @@ class Encoder:
 			f"{Fore.WHITE}{Style.BRIGHT}{len(set(text))}", "unique characters"
 		)
 
-		if text_range is not None:
-			print(
-				"ranged text has", f"{Fore.WHITE}{Style.BRIGHT}{len(text[:text_range])/1e6}M", "characters and",
-				f"{Fore.WHITE}{Style.BRIGHT}{len(set(text[:text_range]))}", "unique characters"
-			)
+		if chunk_range is not None:
+			print("ranged chunks has", f"{Fore.WHITE}{Style.BRIGHT}{chunk_range/1e6}M", "chunks")
 
 		# split the text up into text chunks
 		t = time.time()
-		text_chunks = regex.findall(self.compiled_pattern, text if text_range is None else text[:text_range])
+		text_chunks = regex.findall(self.compiled_pattern, text)
 		print("findall:", calc_total_time(time.time() - t))
 		del text
 
-		print(f"encoding text chunks... {Fore.WHITE}{Style.DIM}(takes a ~minute)")
-
-		# input text preprocessing
 		t = time.time()
-		ids = [list(ch.encode("utf-8")) for ch in text_chunks]
-		print("encode utf-8:", calc_total_time(time.time() - t))
+		ids = Counter([i for i in text_chunks if len(i) > 1])
+		print("total unique chunks:", len(ids.most_common()))
+		ids, idsw = map(list, zip(*ids.most_common(chunk_range)))
+		print("dedup:", calc_total_time(time.time() - t))
 		del text_chunks
 
-		# keep just one instance of identical chunks, keep their count in idsw
-		# https://github.com/karpathy/minbpe/pull/82/files#diff-6b5737d60acbc8d11dba46334d76c559796c1aca8d51e13ed069236f947b9e1f
-		tmp = {}
+		# input text preprocessing
+		print(f"encoding text chunks... {Fore.WHITE}{Style.DIM}(takes a ~minute)")
 		t = time.time()
-		for byte_str in ids:
-			byte_str = bytes(byte_str)
-			tmp[byte_str] = tmp.get(byte_str, 0) + 1
-
-		ids = [list(k) for k in map(list, tmp.keys())]
-		idsw = list(tmp.values())
-		print("dedup:", calc_total_time(time.time() - t))
+		for i, ch in enumerate(ids):
+			ids[i] = list(ch.encode("utf-8"))
+		print("encode utf-8:", calc_total_time(time.time() - t))
 
 		# start training
 		print("training on vocab size", f"{Fore.WHITE}{Style.BRIGHT}{vocab_size}")
@@ -295,12 +287,18 @@ class Encoder:
 		- model file is the critical one, intended for load()
 		"""
 		# write the model: to be used in load() later
-		with open(checkpoint, "wb") as f:
+		with open(checkpoint + ".bin", "wb") as f:
 			pickle.dump({
 				"pattern": self.pattern,
 				"special": self.special_tokens,
 				"vocab": self.vocab
 			}, f)
+
+		# write the model into text file 
+		with open(checkpoint + ".txt", "w", encoding="utf-8") as f:
+			f.write(f"pattern:\n{self.pattern}\n\n")
+			f.write(f"special:\n{self.special_tokens}\n\n")
+			f.write(f"vocab:\n{str(self.vocab)[1:-1].replace(', ', '\n')}\n")
 
 	def load(self, checkpoint: str):
 		# read the model file

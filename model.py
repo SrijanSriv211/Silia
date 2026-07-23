@@ -6,83 +6,118 @@ import torch.nn as nn, torch
 class Config:
 	vocab_size: int = 8192
 	block_size: int = 1024
-	n_layer: int = 2
-	n_head: int = 4
+	n_layer: int = 8
+	n_head: int = 8
 	n_embd: int = 64
+	d_model: int = 256
 
 def norm(x):
 	return F.rms_norm(x, (x.size(-1),))
 
 def apply_rotary_emb(x, cos, sin):
-	assert x.ndim == 4  # multihead attention
+	assert x.ndim == 4 # multihead attention
 	d = x.shape[3] // 2
 	x1, x2 = x[..., :d], x[..., d:] # split up last time into two halves
 	y1 = x1 * cos + x2 * sin # rotate pairs of dims
 	y2 = x1 * (-sin) + x2 * cos
 	return torch.cat([y1, y2], 3)
 
-class CausalSelfAttention(nn.Module):
-	def __init__(self, config: Config, chunk=1):
+# https://arxiv.org/abs/2606.20097
+# inspired from Qwen Team's HydraHead,
+# process half heads with ELA and other half with AFT
+class HydraLatentAttention(nn.Module):
+	def __init__(self, config: Config, d_in, d_out):
 		super().__init__()
+		assert config.n_head % 2 == 0
 		self.n_head = config.n_head
 		self.n_embd = config.n_embd
-		n_qkv = config.n_embd * self.n_head
+		n_qkv = self.n_embd * self.n_head
 
-		self.qkv = nn.Linear(config.n_embd, 3*n_qkv, bias=False)
-		self.out = nn.Linear(n_qkv, config.n_embd*chunk, bias=False)
+		self.gate = nn.Linear(d_in, n_qkv//2)
+		self.qkv_u = nn.Linear(self.n_embd, 3*n_qkv, bias=False)
+		self.qkv_l = nn.Linear(d_in, self.n_embd, bias=False)
+		self.out = nn.Linear(n_qkv, d_out, bias=False)
 
-		self.reset_cache()
-
-	def reset_cache(self):
-		self.k_cache = None
-		self.v_cache = None
-		self.cache_pos = 0
-
-	def setup_cache(self, batch_size, max_seq_len, device, dtype):
-		self.k_cache = torch.empty(batch_size, self.n_head, max_seq_len, self.n_embd, device=device, dtype=dtype)
-		self.v_cache = torch.empty_like(self.k_cache)
-		self.cache_pos = 0
-
-	def forward(self, x, cos_sin, use_cache=False):
-		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-
-		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
-		q, k, v  = self.qkv(x).view(B, T, self.n_head, -1).chunk(3, dim=-1)
-
+	# https://arxiv.org/abs/2405.04434
+	# deepseek mla implementation without decoupled rope,
+	# along with exclusive self attention & gated attention
+	def exclusive_latent_attention(self, q, k, v, g, cos_sin):
 		# apply rotary embeddings to queries and keys to get relative positional encoding
 		cos, sin = cos_sin
 		q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin) # QK rotary embedding
 		q, k = norm(q), norm(k) # QK norm
 
 		# make head be batch dim, i.e. (B, T, nh, hs) -> (B, nh, T, hs)
-		q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-
-		if use_cache:
-			pos = self.cache_pos
-			self.k_cache[:, :, pos:pos+T] = k
-			self.v_cache[:, :, pos:pos+T] = v
-
-			self.cache_pos += T
-			k = self.k_cache[:, :, :self.cache_pos]
-			v = self.v_cache[:, :, :self.cache_pos]
+		q, k, v, g = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), g.transpose(1, 2)
 
 		# causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-		y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=(use_cache == False))
-		y = y.transpose(1, 2).contiguous().view(B, T, -1) # re-assemble all head outputs side by side
+		y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
 
-		# output projection
-		return self.out(y)
+		# apply gated attention
+		# https://arxiv.org/pdf/2505.06708
+		y = y * F.sigmoid(g)
+
+		# XSA mode
+		# https://arxiv.org/pdf/2603.09078
+		vn = torch.nn.functional.normalize(v, dim=-1)
+		y = y - (y * vn).sum(dim=-1, keepdim=True) * vn
+
+		# re-assemble all head outputs side by side
+		return y.transpose(1, 2).contiguous()
+
+	# https://arxiv.org/abs/2105.14103
+	# i'm using apple's attention free transformer
+	# can also use KDA or GDN linear attention, or Nemotron style Mamba as well
+	def attention_free_transformer(self, q, k, v):
+		B, T, nh, hs = q.size() # batch size, sequence length, embedding dimensionality (n_embd)
+		q, k = norm(q), norm(k) # QK norm
+
+		# exponentiate keys
+		w = torch.exp(k) # (B, T, C)
+		kv = w * v # (B, T, C)
+
+		# causal cumulative sums
+		w = torch.cumsum(w, dim=1)
+		kv = torch.cumsum(kv, dim=1)
+
+		# normalize
+		y = kv / (w + 1e-6)
+
+		# gate with query
+		y = torch.sigmoid(q) * y
+		return y.view(B, T, nh, hs)
+
+	def forward(self, x, cos_sin):
+		B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+
+		# calculate query, key, values for all heads in batch and move head forward to be the batch dim
+		c_q, c_kv = self.qkv_l(norm(x)).chunk(2, dim=-1) # `c_kv` will be stored in the KV cache
+		qkv = self.qkv_u(torch.cat([c_q, c_kv], dim=-1)).view(B, T, self.n_head, -1)
+		g = self.gate(norm(x)).view(B, T, self.n_head // 2, -1)
+
+		# pluck out interleaving heads for ela & aft.
+		qkv_ela, qkv_aft = qkv.view(B, T, self.n_head // 2, 2, -1).unbind(dim=3)
+		q_ela, k_ela, v_ela = qkv_ela.chunk(3, dim=-1)
+		q_aft, k_aft, v_aft = qkv_aft.chunk(3, dim=-1)
+
+		ela = self.exclusive_latent_attention(q_ela, k_ela, v_ela, g, cos_sin)
+		aft = self.attention_free_transformer(q_aft, k_aft, v_aft)
+
+		# interleave heads of ela & aft
+		y = torch.stack([ela, aft], dim=3).flatten(2, 3).view(B, T, -1) # (B, T, 2*nh, hs) -> (B, T, 2K)
+		return self.out(norm(y))
 
 class Block(nn.Module):
 	def __init__(self, config: Config):
 		super().__init__()
-		self.attn1 = CausalSelfAttention(config, 2)
-		self.attn2 = CausalSelfAttention(config)
+		# two-thirds trick for hidden dimension to keep compute constant
+		self.a1 = HydraLatentAttention(config, config.n_embd, 2*config.d_model)
+		self.a2 = HydraLatentAttention(config, config.d_model, config.n_embd)
 
-	def forward(self, x, cos_sin, use_cache=False):
-		u, v = self.attn1(norm(x), cos_sin, use_cache).chunk(2, dim=-1)
+	def forward(self, x, cos_sin):
+		u, v = self.a1(x, cos_sin).chunk(2, dim=-1)
 		y = u * F.silu(v)
-		return x + self.attn2(y, cos_sin, use_cache)
+		return x + self.a2(y, cos_sin)
 
 class Silia(nn.Module):
 	def __init__(self, config: Config):
@@ -117,34 +152,19 @@ class Silia(nn.Module):
 		cos, sin = freqs.cos(), freqs.sin()
 		return cos[None, :, None, :], sin[None, :, None, :] # add batch and head dims for later broadcasting
 
-	def setup_cache(self, batch_size, device, dtype):
-		for block in self.blocks:
-			block.attn1.setup_cache(batch_size, self.rotary_block_size, device, dtype)
-			block.attn2.setup_cache(batch_size, self.rotary_block_size, device, dtype)
-
-	def reset_cache(self):
-		for block in self.blocks:
-			block.attn1.reset_cache()
-			block.attn2.reset_cache()
-
-	def forward(self, idx, targets=None, use_cache=False):
+	def forward(self, idx, targets=None):
 		B, T = idx.size()
 
 		# grab the rotary embeddings for the current sequence length (they are of shape (1, seq_len, 1, head_dim))
 		assert T <= self.cos.size(1), f"Sequence length grew beyond the rotary embeddings cache: {T} > {self.cos.size(1)}"
-		if use_cache:
-			pos = self.blocks[0].attn1.cache_pos
-			cos_sin = self.cos[:, pos:pos+T], self.sin[:, pos:pos+T]
-
-		else:
-			cos_sin = self.cos[:, :T], self.sin[:, :T]
+		cos_sin = self.cos[:, :+T], self.sin[:, :+T]
 
 		# token embeddings of shape (b, t, n_embd)
 		x = self.embed(idx)
 		x = norm(x)
 
 		for block in self.blocks:
-			x = block(x, cos_sin, use_cache)
+			x = block(x, cos_sin)
 
 		# forward the lm_head (compute logits)
 		x = norm(x)
@@ -155,15 +175,18 @@ class Silia(nn.Module):
 		return logits, loss
 
 	@torch.no_grad()
-	def generate(self, idx, max_new_tokens, device, temperature=1.0, top_k=50):
-		self.reset_cache()
-		self.setup_cache(batch_size=1, device=device, dtype=self.embed.weight.dtype)
-
-		# forward the model to get the logits for the index in the sequence
+	def generate(self, idx, max_new_tokens, sink_tok, device, temperature=0.8, top_k=50):
 		idx = torch.tensor(idx, dtype=torch.int64, device=device).unsqueeze(0)
-		logits, _ = self(idx, use_cache=True)
+		sink_tok = torch.tensor([sink_tok], dtype=torch.int64, device=device).unsqueeze(0)
 
 		for _ in range(max_new_tokens):
+			# our very first step, pass the initial sequence context to the model
+			# if the sequence context is growing too long we must crop it at block_size
+			idx_cond = idx[:, -self.rotary_block_size:] if idx.size(1) > self.rotary_block_size else idx
+			idx_cond = torch.cat([sink_tok, idx_cond], dim=1)
+
+			# forward the model to get the logits for the index in the sequence
+			logits, _ = self(idx_cond)
 			logits = logits[:, -1, :]
 
 			# pluck the logits at the final step and scale by desired temperature
@@ -182,9 +205,5 @@ class Silia(nn.Module):
 
 			else:
 				idx_next = torch.argmax(logits, dim=-1, keepdim=True)
-
 			idx = torch.cat([idx, idx_next], dim=1)
-			logits, _ = self(idx_next, use_cache=True)
-
-			# stream tokens
-			yield idx_next.item()
+		return idx
