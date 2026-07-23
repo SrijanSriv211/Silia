@@ -235,10 +235,10 @@ Since $h$ is always a positive integer we can discard $-0.2396$ and round $1.302
 
 ## 5. Training
 ### 5.1. Training Data
-I trained on a Fineweb-edu dataset consisting of about ~350M characters. All the characters were encoded using byte-pair encoding, which has a shared source-target vocabulary of 512 token. The dataset after tokenization contained ~275M tokens.
+I trained on a Fineweb-edu dataset consisting of about ~350M characters. All the characters were encoded using byte-pair encoding, which has a shared source-target vocabulary of 512 token. The dataset after tokenization contained ~275M tokens. The train split had ~220M tokens and val split had ~55M tokens.
 
 ### 5.2. Hardware
-I trained the base model on Google Colab Tesla T4 GPU for ~1.5 hours using the hyperparameter described throughout the paper.
+I trained the base model on Google Colab Tesla T4 GPU using the hyperparameters described throughout the paper.
 
 ### 5.3. Optimizer
 The AdamW optimizer with ${\beta}_1 = 0.9$, ${\beta}_2 = 0.95$ and $\epsilon = 10^{−8}$ was used to train the embedding layers, while the Muon optimizer with $\mu = 95$ was used to train rest of the non-embedding layers.
@@ -284,19 +284,59 @@ $$
 
 This corresponds to increasing the learning rate linearly for the first $T_w$ training steps, and decreasing it thereafter using the cosine decay rule as formulated above.
 
-
-## 6. Results
-
-|             | Non-Embedding Parameters | Vocab Size | Context Length | Layers | $d_{model}$ | $d_{head}$ | $d_{ff}$ | $h$ |
-| ----------- | ------------------------ | ---------- | -------------- | ------ | ----------- | ---------- | -------- | --- |
-| **Silia**   | 491904                   | 512        | 1024           | 3      | 64          | 64         | 256      | 2   |
-| **nanoGPT** | 524288                   | 512        | 1024           | 2      | 128         | 64         | 256      | 2   |
-
-Both models were trained with the following settings:
+### 5.3. Configuration
+20k steps is ~5 epochs on the train split which makes up 1B tokens in total. A higher peak learning rate was chosen since smaller models can oftentimes tolerate them. Training on lower and more standard peak learning rate such as $7e-4$ resulted in sub-optimal training in same number of training steps.
 
 | $t$    | $\eta_{max}$ | $\eta_{min}$ | $T_w$ | $T_d$  | $c$  | $T_c$  |
 | ------ | ------------ | ------------ | ----- | ------ | ---- | ------ |
 | 20,000 | 3e-3         | 3e-4         | 1000  | 20,000 | 0.45 | 11,000 |
+<div style="text-align: center; margin-top: 0.2em;">
+<i>Table 1.</i> Training configurations for my Silia model.
+</div>
+
+
+## 6. Results
+**Silia** was trained on Google Colab Tesla T4 GPU for ~1.5 hours of wall-clock time with the given training configurations in _Table 1_ and model hyperparameters in _Table 2_.
+
+| Model             | Parameters | Vocab Size | Context Length | Layers | $d_{ff}$ | $d_{model}$ | $d_{head}$ | $h_Q$, $h_{KV}$ |
+| ----------------- | ---------- | ---------- | -------------- | ------ | -------- | ----------- | ---------- | --------------- |
+| **Silia (mine)**  | 524,672    | 512        | 1024           | 3      | 256      | 64          | 64         | 2, 2            |
+| **Quark-v2**      | 465,504    | 500        | 256            | 4      | 192      | 96          | 24         | 4, 4            |
+| **Spark-v4**      | 4,980,736  | 4096       | 512            | 6      | 512      | 256         | 32         | 8, 8            |
+| **Supra-Mini-v6** | 1,410,688  | 4096       | 1024           | 6      | 256      | 128         | 32         | 4, 2            |
+<div style="text-align: center; margin-top: 0.2em;">
+<i>Table 2.</i> Hyperparameters and number of parameters of Silia (mine), Quark-v2 and Spark-v4 by LH-Tech-AI, and Supra-Mini-v6 by SupraLabs. All the models used RoPE for positional embedding and Silu as the hidden activation function.
+</div>
+
+### 6.1. Benchmark Progression
+In _Table 3_ you can find the detailed comparison of Silia with all models listed in _Table 2_ on the HellaSwag, PIQA and LAMBADA benchmarks along with the final validation loss of the models.
+
+| Benchmark             | Silia (mine) | Quark-v2 | Spark-v4   | Supra-Mini-v6 |
+| --------------------- | ------------ | -------- | ---------- | ------------- |
+| HellaSwag (acc)       | **0.2804**   | 0.2615   | 0.2695     | 0.2674        |
+| PIQA (acc)            | _0.5419_     | 0.5283   | **0.5593** | 0.5403        |
+| LAMBADA (ppl)         | _1704_       | 3500     | **588**    | 2089          |
+| Final validation loss | **2.393**    | 2.556    | 3.108      | 3.79          |
+<div style="text-align: center; margin-top: 0.2em;">
+<i>Table 3.</i> Silia is the best performing model for it's parameter size in every aspect.
+</div>
+
+Silia 0.5M performs the best in all benchmarks compared to Quark-v2 0.5M while it does lose to Spark-v4 5M in PIQA and LAMBADA benchmarks it remains in 2nd best model in both of these benchmarks.
+
+### 6.2. Generation Outputs
+#### 6.2.1. Silia 0.5M (mine)
+_- Belief off then, few infrarested directed in Kanetware, deference. Compost, Vocanter, and David Harbor Kanet. An over 100-minded nature. And the amount of a book of curriculum, produced director offered by the part of the two books and how in the past form. The smallest, the experiment was made to morality and papers, finds the history of ruling. Since the vote of power months and history are used to preserve the <|end-text|>he just accepting the writing of a joint ages, and she says._
+_In 1874, however, the person’s joint was told of the joint hospitals, or jointed the joint, and two-conformed to a series of different locations. Note that referred to as joint the group of scientists at the New York’s Being and the Sexual Sundays, and the French revolutionary possible. That is the dense, we will be what it has taken home to do with local countries over a local local papers and gives the period of papers that contribute to a smaller rock in the joint, a different scientists, and the agencies could be a rockeform that its actual agency do not easily translate._
+_In this case, the Ecclesiah, the joint was a different transmission of the scientists and the holocument. Better hospitals have the local papers of the Australian Professional, jointly belongs to strength, and whether the Hospitals should not be present in the joint writing. The papers but only required to leave the Space County for jointly denominations._
+_The Records Ana Woln, a n<|end-text|>ng remained into a bathway of a bathway in the accuracy. It is then as the legal accuracy of pencils against its traditional state of accuracy of the Ministry of San Department of Management, Taxa was about someone possible._
+_So, what blows all does not convey the signals of the bathways and herbivore the traditional material - it’s just accuracy. They were supposed to be conducted to provide others into accuracy, fathers and others. It had remained from either with the entire tree of the father. It was able to the write._
+_So, then, quarters brings the people to go out with them, to ground, and created what herb_
+
+#### 6.2.2. Quark-v2 0.5M
+_Artificial intelligence is very possible. In the early 19th century, it has been done in the brain and acids, where they are taking some of the most common reality. This can also have to be lower than any other studies that would not be able to use this factor. If you’ve seen the same part of the world’s little glaucoma, we should need to be able to maintain their important_
+
+#### 6.2.3. Spark-v4 5M
+_is that it gives some unlimited means to think about the universe. It helps us not only to think about how the universe is created but also how we think about the universe. In this way, an inner universe can be made to our own universe. This is because it is not a matter of fact and that is the object of the universe. It can take a lot of time to understand how it is created and why it must be made. In the first place, the Universe is a complex and interesting part of it. It can be a kind of a real, creative, and universal part of our universe. It can be just that the universe was created. It could be a kind of universe. It can be a kind of kind of complex concept. That could be something that does something that really needs to be a kind of universe, or something that_
 
 
 ## 7. Conclusion
